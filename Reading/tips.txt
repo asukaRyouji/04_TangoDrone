@@ -1,0 +1,31 @@
+1. Approach mode switch
+   (1) visual_servoing.c
+   #ifndef VS_APPROACH_MODE
+   #define VS_APPROACH_MODE 1
+   #endif
+   (2) bepop_visual_servoing.xml
+   <define name="VS_APPROACH_MODE" value="1"/>
+2. Manual flight
+   (1) calibration for the remoter
+   (2) bepop_visual_servoing.xml
+   <define name="MODE_MANUAL" value="AP_MODE_ATTITUDE_DIRECT"/>
+   (3) add the joystick program and run
+   (4) J101 working
+3. INDI tuning
+   (1) after taking off, set the seetings/indi/user_adaptive from false to true (never turn that on when landing or taking off)
+   (2) fly to a few predefined waypoints
+   (3) read the values for ctrl_eff_p, _q, _r and g2
+   (4) set it within the conf/airframes/tudelft/bepop_visual_servoing.xml
+4. /home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/flower_motion_plugin/flower_motion_plugin.cpp
+   (1) cd build     cmake ..     make
+5. When copied the paparazzi folder to a new destination
+   (1) make clean; make
+   (2) /home/admin_user/Desktop/02_BumbleDrone/paparazzi/var/include/pprzlink/telemetry/VISUAL_SERVOING.h replace it with the original one
+6. New .dae mesh file from blender
+   (1)      <ambient>
+              <color sid="ambient">0.8000001 0.08751009 0.04496246 1</color>
+            </ambient>
+            <diffuse>
+              <color sid="diffuse">0.8000001 0.08751009 0.04496246 1</color>
+            </diffuse> to replace the original diffuse block
+
