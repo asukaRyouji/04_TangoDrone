@@ -1,0 +1,58 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+
+<module name="visual_servoing" dir="visual_servoing">
+  <doc>
+    <description>
+    Exercise module for Autonomous Flight of MAV Course
+    </description>
+    <section name="VS" prefix="VS_">
+      <define name="NOM_THROTTLE" value="0.73" description="nominal throttle"/>
+      <define name="SET_POINT" value="0.1" description="divergence set-point"/>
+      <define name="OL_X_PGAIN" value="0.1" description="outer loop x proportional gain"/>
+      <define name="OL_Y_PGAIN" value="0.1" description="outer loop y proportional gain"/>
+      <define name="OL_Z_PGAIN" value="1" description="outer loop z proportional gain"/>
+      <define name="OL_Y_DGAIN" value="0" description="outer loop y derivative gain"/>
+      <define name="OL_Z_DGAIN" value="0" description="outer loop z derivative gain"/>
+      <define name="OL_X_IGAIN" value="0" description="outer loop x integral gain"/>
+      <define name="LP_CONST" value="0.2" description="Low pass filter constant"/>
+      <define name="SWITCH_MAGNITUDE" value="1" description="Switch magnitude"/>
+      <define name="SWITCH_DECAY" value="1.2" description="Decay parameter of the standard set-point switching maneuver"/>
+      <define name="THETA_OFFSET" value="0.01" description="offset for theta"/>
+      <define name="CC_THRESHOLD" value="5000" description="Threshold of orange pixels for manual switching to new set-point"/>
+      <define name="NEW_SET_POINT" value="0.3" description="New divergence set-point when switching is set to manual"/>
+    </section>
+  </doc>
+  <settings>
+    <dl_settings>
+      <dl_settings NAME="VisualServoing">
+        <dl_setting var="visual_servoing.nominal_throttle" min="0" step="0.001" max="0.8" module="visual_servoing/visual_servoing" shortname="nominal_throttle" param="VS_NOM_THROTTLE"/>
+        <dl_setting var="visual_servoing.set_point" min="0" step="0.01" max="1" module="visual_servoing/visual_servoing" shortname="set_point" param="VS_SET_POINT"/>
+        <dl_setting var="visual_servoing.ol_x_pgain" min="0" step="0.1" max="15" module="visual_servoing/visual_servoing" shortname="ol_x_pgain" param="VS_OL_X_PGAIN"/>
+        <dl_setting var="visual_servoing.ol_y_pgain" min="0" step="0.001" max="1" module="visual_servoing/visual_servoing" shortname="ol_y_pgain" param="VS_OL_Y_PGAIN"/>
+        <dl_setting var="visual_servoing.ol_z_pgain" min="0" step="0.001" max="1" module="visual_servoing/visual_servoing" shortname="ol_z_pgain" param="VS_OL_Z_PGAIN"/>
+        <dl_setting var="visual_servoing.ol_y_dgain" min="0" step="0.001" max="0.1" module="visual_servoing/visual_servoing" shortname="ol_y_dgain" param="VS_OL_Y_DGAIN"/>
+        <dl_setting var="visual_servoing.ol_z_dgain" min="0" step="0.001" max="0.1" module="visual_servoing/visual_servoing" shortname="ol_z_dgain" param="VS_OL_Z_DGAIN"/>
+        <dl_setting var="visual_servoing.ol_x_igain" min="0" step="0.001" max="1" module="visual_servoing/visual_servoing" shortname="ol_x_igain" param="VS_OL_X_IGAIN"/>
+        <dl_setting var="visual_servoing.lp_const" min="0" step="0.1" max="100" module="visual_servoing/visual_servoing" shortname="lp_const" param="VS_LP_CONST"/>
+        <dl_setting var="visual_servoing.switch_magnitude" min="0" step="0.1" max="3" module="visual_servoing/visual_servoing" shortname="switch_magnitude" param="VS_SWITCH_MAGNITUDE"/>
+        <dl_setting var="visual_servoing.switch_decay" min="0" step="0.1" max="3" module="visual_servoing/visual_servoing" shortname="switch_decay" param="VS_SWITCH_DECAY"/>
+        <dl_setting var="visual_servoing.theta_offset" min="-1" step="0.001" max="1" module="visual_servoing/visual_servoing" shortname="theta_offset" param="VS_THETA_OFFSET"/>
+        <dl_setting var="visual_servoing.color_count_threshold" min="0" step="1000" max="50000" module="visual_servoing/visual_servoing" shortname="cc_threshold" param="VS_CC_THRESHOLD"/>
+        <dl_setting var="visual_servoing.new_set_point" min="0" step="0.01" max="1" module="visual_servoing/visual_servoing" shortname="new_set_point" param="VS_NEW_SET_POINT"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <dep>
+    <depends>cv_detect_color_object</depends>
+  </dep>
+
+  <header>
+    <file name="visual_servoing.h"/>
+  </header>
+  
+  <makefile target="ap|nps">
+    <file name="visual_servoing.c"/>
+    <define name="VISUAL_SERVOING_CAMERA" value="front_camera"/>
+  </makefile>
+</module>

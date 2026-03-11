@@ -1,0 +1,3 @@
+/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/flower_motion_plugin/build/CMakeFiles/flower_motion.dir
+/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/flower_motion_plugin/build/CMakeFiles/edit_cache.dir
+/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/flower_motion_plugin/build/CMakeFiles/rebuild_cache.dir

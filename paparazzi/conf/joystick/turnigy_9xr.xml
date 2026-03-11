@@ -1,0 +1,29 @@
+<!--
+If you want to fly your UAS via the joystick add thid to your session:
+
+ /home/username/paparazzi/sw/ground_segment/joystick/input2ivy  -d 0 -ac yourarfamename hobbyking_usb_rc_6ch_rc_tx_joy_mode_2.xml
+
+Where -d 0 must be -d 1 if you have a laptop with accelometer installed
+
+The basis of steering is the standard signs of aerospace convention
+-->
+
+<joystick>
+  <input>
+    <axis index="0" name="yaw"/>
+    <axis index="1" name="roll"/>
+    <axis index="5" name="throttle"/>
+    <axis index="6" name="pitch"/>
+    <axis index="2" name="mode"/>
+  </input>
+
+  <messages period="0.0333333">
+    <message class="datalink" name="RC_4CH" send_always="true">
+      <field name="throttle" value="Fit(throttle,-127,127,0,127)"/>
+      <field name="roll" value="Fit(roll,-125,125,-127,127)" />
+      <field name="pitch" value="Fit(-pitch,-127,127,-127,127)"/>
+      <field name="yaw" value="Fit(yaw,-127,127,-127,127)"/>
+      <field name="mode" value="Fit(mode,-126,126,0,127)"/>
+    </message>
+  </messages>
+</joystick>

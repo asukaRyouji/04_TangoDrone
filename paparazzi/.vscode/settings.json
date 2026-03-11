@@ -1,0 +1,23 @@
+{
+    "[c]": {
+        "editor.tabSize": 2,
+    },
+    "[cpp]": {
+        "editor.tabSize": 2,
+    },
+    "[python]": {
+        "editor.tabSize": 4,
+    },
+    "files.associations": {
+        "Makefile.*": "makefile",
+        "string": "c",
+        "undistortion.h": "c",
+        "tensor": "c",
+        "cmath": "c",
+        "complex": "c"
+    },
+    "C_Cpp.dimInactiveRegions": false,
+    "esbonio.sphinx.confDir": "",
+    "cmake.configureOnOpen": true,
+    "C_Cpp.errorSquiggles": "enabled",
+}

@@ -1,0 +1,6 @@
+# Uses default linux arm-linux-gnueabi-gcc
+
+set(GCC_COMPILER_VERSION "" CACHE STRING "GCC Compiler version")
+set(GNU_MACHINE "arm-linux-gnueabi" CACHE STRING "GNU compiler triple")
+
+INCLUDE(${CMAKE_CURRENT_LIST_DIR}/bebop.toolchain.cmake.common REQUIRED)

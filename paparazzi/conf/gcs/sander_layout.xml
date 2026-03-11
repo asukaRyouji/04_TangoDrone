@@ -1,0 +1,14 @@
+<!DOCTYPE layout SYSTEM "layout.dtd">
+
+<layout width="919" height="1043">
+  <columns>
+    <rows SIZE="400">
+      <widget NAME="strips" size="615"/>
+      <widget NAME="alarms" size="418"/>
+    </rows>
+    <rows>
+      <widget NAME="map2d" size="37"/>
+      <widget NAME="aircraft" size="996"/>
+    </rows>
+  </columns>
+</layout>
