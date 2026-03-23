@@ -84,6 +84,7 @@ public:
     this->logFile
       << "t,"
       << "drone_x,drone_y,drone_z,"
+      << "drone_vel_x,drone_vel_y,drone_vel_z,"
       << "drone_roll,drone_pitch,drone_yaw,"
       << "flower_x,flower_y,flower_z,"
       << "flower_roll,flower_pitch,flower_yaw,"
@@ -126,6 +127,7 @@ private:
     this->lastLogTime = now;
 
     ignition::math::Pose3d dronePose = this->droneModel->WorldPose();
+    ignition::math::Vector3d droneVel = this->droneModel->WorldLinearVel();
     ignition::math::Pose3d flowerPose = this->flowerModel->WorldPose();
 
     const double dx = flowerPose.Pos().X() - dronePose.Pos().X();
@@ -139,6 +141,9 @@ private:
                   << dronePose.Pos().X() << ","
                   << dronePose.Pos().Y() << ","
                   << dronePose.Pos().Z() << ","
+                  << droneVel.X() << ","
+                  << droneVel.Y() << ","
+                  << droneVel.Z() << ","
                   << dronePose.Rot().Roll() << ","
                   << dronePose.Rot().Pitch() << ","
                   << dronePose.Rot().Yaw() << ","

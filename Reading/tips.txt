@@ -28,4 +28,10 @@
             <diffuse>
               <color sid="diffuse">0.8000001 0.08751009 0.04496246 1</color>
             </diffuse> to replace the original diffuse block
-
+7. To log new states for the logger paparazzi
+   (1) sw/airborne/modules/loggers/logger_file.c
+8. Real time plotter
+   (1) visual_sercoing.c pprz_msg_send_VISUAL_SERVOING
+   (3) var/inlcude/pprzlink/telemetry/visual_servoing.h	
+   (4) conf/messages.xml to add those new variables
+   (5) conf/control_panel.xml to add the new window

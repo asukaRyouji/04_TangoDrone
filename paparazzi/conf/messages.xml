@@ -1500,6 +1500,11 @@
       <field name="divergence_sp"  type="float"/>
       <field name="div_sum"  type="float"/>
       <field name="mu_x"  type="float"/>
+      <field name="p_output"  type="float"/>
+      <field name="i_output"  type="float"/>
+      <field name="pid_on"  type="float"/>
+      <field name="of_y"  type="float"/>
+      <field name="of_y_d"  type="float"/>
     </message>
 
     <message name="ROTORCRAFT_NAV_STATUS" id="159">

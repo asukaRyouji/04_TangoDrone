@@ -62,6 +62,16 @@ struct VisualServoing {
   float i_output;
   float pid_on;
   float time_since_last;
+  float vel_x;
+  float vel_x_sp;
+  float Kp_vx;
+  float mu_vx_ff;
+  float raw_of_y;
+  float of_y;
+  float raw_of_y_d;
+  float of_y_d;
+  float prev_box_centroid_y;
+  float prev_of_y;
 };
 
 extern struct VisualServoing visual_servoing;

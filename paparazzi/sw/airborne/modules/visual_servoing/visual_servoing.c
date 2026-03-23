@@ -61,7 +61,7 @@
 #endif
 
 #ifndef VS_OL_Z_DGAIN
-#define VS_OL_Z_DGAIN 0.005
+#define VS_OL_Z_DGAIN 0.002
 #endif
 
 #ifndef VS_OL_X_IGAIN
@@ -125,6 +125,8 @@ float switch_distance = 10;
 bool reset_switch_time_end_bool = FALSE;
 bool first_interation = FALSE;
 
+float vs_enable_time = 0.0f;
+
 int switch_count = 0;
 float divsp_list[4] = {0.037963f, 0.105616f, 0.174661f, 0.523801f};
 
@@ -149,7 +151,9 @@ static void send_vs_attitude(struct transport_tx *trans, struct link_device *dev
                                 &visual_servoing.mu_x,
                                 &visual_servoing.p_output,
                                 &visual_servoing.i_output,
-                                &visual_servoing.pid_on);
+                                &visual_servoing.pid_on,
+                                &visual_servoing.of_y,
+                                &visual_servoing.of_y_d);
 }
 
 // This call back will be used to receive the color count and centroid from the orange detector
@@ -233,6 +237,16 @@ void visual_servoing_module_init(void)
   visual_servoing.i_output = 0;
   visual_servoing.pid_on = 2;
   visual_servoing.time_since_last = 0.0;
+  visual_servoing.vel_x = 0;
+  visual_servoing.vel_x_sp = -0.02;
+  visual_servoing.Kp_vx = 0.52;
+  visual_servoing.mu_vx_ff = 0.0;
+  visual_servoing.raw_of_y = 0;
+  visual_servoing.of_y = 0;
+  visual_servoing.raw_of_y_d = 0;
+  visual_servoing.of_y_d = 0;
+  visual_servoing.prev_box_centroid_y = 0;
+  visual_servoing.prev_of_y = 0;
 
   // bind our colorfilter callbacks to receive the color filter outputs
   AbiBindMsgVISUAL_DETECTION(ORANGE_AVOIDER_VISUAL_DETECTION_ID, &color_detection_ev, color_detection_cb);
@@ -271,6 +285,17 @@ static void reset_all_vars(void)
   visual_servoing.p_output = 0;
   visual_servoing.i_output = 0;
   visual_servoing.pid_on = 0;
+  visual_servoing.vel_x = 0;
+  visual_servoing.vel_x_sp = -0.02;
+  visual_servoing.Kp_vx = 0.52;
+  visual_servoing.mu_vx_ff = 0.0;
+  visual_servoing.raw_of_y = 0;
+  visual_servoing.of_y = 0;
+  visual_servoing.raw_of_y_d = 0;
+  visual_servoing.of_y_d = 0;
+  visual_servoing.prev_box_centroid_y = 0;
+  visual_servoing.prev_of_y = 0;
+  vs_enable_time = (float)get_sys_time_usec() / 1e6;
   landing = FALSE;
   switch_time_start = 0.0;
   switch_time_end = 0.0;
@@ -299,16 +324,16 @@ void visual_servoing_module_run(bool in_flight)
   prev_vision_time = vision_time;
 
   // Initiate final landing maneuver
-  if (visual_servoing.color_count > 55000 && !landing){
-    landing = TRUE;
-    end_time = (float)get_sys_time_usec() / 1e6;
-  }
+  // if (visual_servoing.color_count > 55000 && !landing){
+  //   landing = TRUE;
+  //   end_time = (float)get_sys_time_usec() / 1e6;
+  // }
 
   // Calculate time after the last set-point switch
   float vs_time = (float)get_sys_time_usec() / 1e6;
 
   // Reset the switch_time_end at the beginning to start PID phase for the ablation tests
-  switch_time_end = reset_switch_time_end(switch_time_end);
+  // switch_time_end = reset_switch_time_end(switch_time_end);
 
   float time_since_last = vs_time - switch_time_end;
   
@@ -323,10 +348,10 @@ void visual_servoing_module_run(bool in_flight)
   }
 
   // When manual switching
-  if (visual_servoing.manual_switching == 1 && set_point_count == 0 && visual_servoing.color_count > visual_servoing.color_count_threshold){
-    visual_servoing.set_point = visual_servoing.new_set_point;
-    set_point_count += 1;
-  }
+  // if (visual_servoing.manual_switching == 1 && set_point_count == 0 && visual_servoing.color_count > visual_servoing.color_count_threshold){
+  //  visual_servoing.set_point = visual_servoing.new_set_point;
+  //  set_point_count += 1;
+  // }
   
   // check if new measurement received
   if (visual_servoing.dt > 1e-5 && !landing){
@@ -372,6 +397,31 @@ void visual_servoing_module_run(bool in_flight)
 
     // update control errors
     update_errors(visual_servoing.box_centroid_x, visual_servoing.box_centroid_y, visual_servoing.div_err, visual_servoing.dt);
+
+    // Compute optic flow
+    if (last_color_count && visual_servoing.color_count != 0){
+      visual_servoing.raw_of_y = (visual_servoing.box_centroid_y - visual_servoing.prev_box_centroid_y) / visual_servoing.dt;
+    }
+    else {visual_servoing.raw_of_y = visual_servoing.of_y;}
+
+    // Low-pass filter the raw optic flow signal
+    Bound(visual_servoing.lp_const, 0.001f, 100.f);
+    float lp_factor_of = visual_servoing.dt / (visual_servoing.lp_const / sqrt(visual_servoing.color_count));
+    Bound(lp_factor_of, 0.f, 1.f);
+
+    visual_servoing.of_y += (visual_servoing.raw_of_y - visual_servoing.of_y) * lp_factor_of;
+
+    // Compute derivative of filtered optic flow
+    visual_servoing.raw_of_y_d = (visual_servoing.of_y - visual_servoing.prev_of_y) / visual_servoing.dt;
+
+    // Low-pass filter optic flow derivative
+    float lp_factor_of_d = visual_servoing.dt / 0.02f;
+    Bound(lp_factor_of_d, 0.f, 1.f);
+    visual_servoing.of_y_d += (visual_servoing.raw_of_y_d - visual_servoing.of_y_d) * lp_factor_of_d;
+    
+    // update for the next iteration
+    visual_servoing.prev_box_centroid_y = visual_servoing.box_centroid_y;
+    visual_servoing.prev_of_y = visual_servoing.of_y;
   }
 
   // Extrapolate distance estimate
@@ -393,8 +443,21 @@ void visual_servoing_module_run(bool in_flight)
    }
   }
 
+  // approach mode 3 for optic flow based sideway controller
   else if (visual_servoing.approach_mode == 3){
-    visual_servoing.mu_x = 0.0;
+    float ff_time = vs_time - vs_enable_time;
+    visual_servoing.vel_x = speed->x;
+    // 0.50 Hz dur 0.30 mag -0.08 Kp 0.52
+    if (ff_time <= 0.30f){
+      visual_servoing.mu_vx_ff = -0.08f;
+    }
+    else {
+      visual_servoing.mu_vx_ff = 0.0f;
+    }
+
+    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    // visual_servoing.mu_x = 0.0;
+    Bound(visual_servoing.mu_x, -0.4f, 0.4f);
   }
 
   else{
@@ -414,7 +477,9 @@ void visual_servoing_module_run(bool in_flight)
   }
 
   // Always control y and z with vision
-  visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
+  // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
+  visual_servoing.mu_y = - visual_servoing.ol_y_pgain * visual_servoing.of_y - visual_servoing.ol_y_dgain * visual_servoing.of_y_d;
+  // visual_servoing.mu_y = 0.0;
   visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + 10) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
 
   if (!landing){

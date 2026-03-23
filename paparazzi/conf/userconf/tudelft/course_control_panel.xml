@@ -81,6 +81,13 @@
         <arg flag="-c" constant="0"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:distance_est"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:true_distance"/>
+        <arg flag="-n"/>
+        <arg flag="-g" constant="800x250-0+750"/>
+        <arg flag="-t" constant="OPTICFLOW"/>
+        <arg flag="-u" constant="0.1"/>
+        <arg flag="-c" constant="0"/>
+        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:of_y"/>
+        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:of_y_d"/>
       </program>
       <program name="Real-time Plotter"/>
     </session>
