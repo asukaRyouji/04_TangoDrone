@@ -73,7 +73,7 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "dt,raw_divergence,color_count,");
   fprintf(file, "mu_x,p_output,i_output,");
   fprintf(file, "pid_on, time_sl,");
-  fprintf(file, "of_y, of_y_d,");
+  fprintf(file, "raw_of_y, lp_const_of, of_y, of_y_d,");
   fprintf(file, "mu_y, mu_z,");
 #ifdef BOARD_BEBOP
   fprintf(file, "rpm_obs_1,rpm_obs_2,rpm_obs_3,rpm_obs_4,");
@@ -106,12 +106,12 @@ static void logger_file_write_row(FILE *file) {
   fprintf(file, "%f,%f,%f,", vel->x, vel->y, vel->z);
   fprintf(file, "%f,%f,%f,", acc->x, acc->y, acc->z);
   fprintf(file, "%f,%f,%f,", att->phi, att->theta, att->psi);
-  fprintf(file, "%f,%f,%f,", visual_servoing.distance_est, visual_servoing.box_centroid_x ,visual_servoing.box_centroid_y);
+  fprintf(file, "%f,%f,%f,", visual_servoing.distance_est, visual_servoing.box_centroid_x, visual_servoing.box_centroid_y);
   fprintf(file, "%f,%f,%f,%f,", visual_servoing.divergence, visual_servoing.true_divergence, visual_servoing.divergence_sp, visual_servoing.set_point);
   fprintf(file, "%f,%f,%f,", visual_servoing.dt, visual_servoing.raw_divergence, visual_servoing.color_count);
   fprintf(file, "%f,%f,%f,", visual_servoing.mu_x, visual_servoing.p_output, visual_servoing.i_output);
   fprintf(file, "%f,%f,", visual_servoing.pid_on, visual_servoing.time_since_last);
-  fprintf(file, "%f,%f,", visual_servoing.of_y, visual_servoing.of_y_d);
+  fprintf(file, "%f,%f,%f,%f,", visual_servoing.raw_of_y, visual_servoing.lp_const_of, visual_servoing.of_y, visual_servoing.of_y_d);
   fprintf(file, "%f,%f,", visual_servoing.mu_y, visual_servoing.mu_z);
 #ifdef BOARD_BEBOP
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_obs[0],actuators_bebop.rpm_obs[1],actuators_bebop.rpm_obs[2],actuators_bebop.rpm_obs[3]);

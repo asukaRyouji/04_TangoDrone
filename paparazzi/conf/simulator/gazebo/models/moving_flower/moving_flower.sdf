@@ -30,7 +30,7 @@
       <amplitude>0.3</amplitude>
       <frequency>0.50</frequency>
       <axis>x</axis>
-      <start_delay>15.0</start_delay>
+      <start_delay>20.0</start_delay>
     </plugin>
 
   </model>

@@ -68,7 +68,7 @@
       <drone_model_name>bebop</drone_model_name>
       <flower_model_name>moving_flower</flower_model_name>
       <log_path>/home/admin_user/Desktop/04_TangoDrone/Simulation_data</log_path>
-      <log_rate>100.0</log_rate>
+      <log_rate>500.0</log_rate>
     </plugin>
 
     <!-- actor name="moving_flower">

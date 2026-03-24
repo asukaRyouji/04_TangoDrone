@@ -32,7 +32,7 @@ public:
     this->droneModelName = "bebop";
     this->flowerModelName = "moving_flower";
     this->logDirectory = "/home/admin_user/Desktop/04_TangoDrone/Simulation_data";
-    this->logRate = 100.0;  // Hz
+    this->logRate = 500.0;  // Hz
 
     // Optional SDF overrides
     if (_sdf->HasElement("drone_model_name"))

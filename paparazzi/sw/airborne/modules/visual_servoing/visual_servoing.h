@@ -68,10 +68,19 @@ struct VisualServoing {
   float mu_vx_ff;
   float raw_of_y;
   float of_y;
+  float lp_const_of;
   float raw_of_y_d;
   float of_y_d;
   float prev_box_centroid_y;
-  float prev_of_y;
+  float prev_of_y_1;
+  float prev_of_y_2;
+  float prev_raw_of_y_1;
+  float prev_raw_of_y_2;
+  float lp_of_b0;
+  float lp_of_b1;
+  float lp_of_b2;
+  float lp_of_a1;
+  float lp_of_a2;
 };
 
 extern struct VisualServoing visual_servoing;

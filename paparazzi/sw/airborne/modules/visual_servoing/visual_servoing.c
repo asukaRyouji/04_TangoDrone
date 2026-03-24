@@ -243,10 +243,19 @@ void visual_servoing_module_init(void)
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
+  visual_servoing.lp_const_of = 0;
   visual_servoing.raw_of_y_d = 0;
   visual_servoing.of_y_d = 0;
   visual_servoing.prev_box_centroid_y = 0;
-  visual_servoing.prev_of_y = 0;
+  visual_servoing.prev_of_y_1 = 0;
+  visual_servoing.prev_of_y_2 = 0;
+  visual_servoing.prev_raw_of_y_1 = 0;
+  visual_servoing.prev_raw_of_y_2 = 0;
+  visual_servoing.lp_of_b0 = 0.20657208f;
+  visual_servoing.lp_of_b1 = 0.41314416f;
+  visual_servoing.lp_of_b2 = 0.20657208f;
+  visual_servoing.lp_of_a1 = -0.36952737f;
+  visual_servoing.lp_of_a2 = 0.195815712f;
 
   // bind our colorfilter callbacks to receive the color filter outputs
   AbiBindMsgVISUAL_DETECTION(ORANGE_AVOIDER_VISUAL_DETECTION_ID, &color_detection_ev, color_detection_cb);
@@ -291,10 +300,19 @@ static void reset_all_vars(void)
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
+  visual_servoing.lp_const_of = 0;
   visual_servoing.raw_of_y_d = 0;
   visual_servoing.of_y_d = 0;
   visual_servoing.prev_box_centroid_y = 0;
-  visual_servoing.prev_of_y = 0;
+  visual_servoing.prev_of_y_1 = 0;
+  visual_servoing.prev_of_y_2 = 0;
+  visual_servoing.prev_raw_of_y_1 = 0;
+  visual_servoing.prev_raw_of_y_2 = 0;
+  visual_servoing.lp_of_b0 = 0.20657208f;
+  visual_servoing.lp_of_b1 = 0.41314416f;
+  visual_servoing.lp_of_b2 = 0.20657208f;
+  visual_servoing.lp_of_a1 = -0.36952737f;
+  visual_servoing.lp_of_a2 = 0.195815712f;
   vs_enable_time = (float)get_sys_time_usec() / 1e6;
   landing = FALSE;
   switch_time_start = 0.0;
@@ -405,14 +423,11 @@ void visual_servoing_module_run(bool in_flight)
     else {visual_servoing.raw_of_y = visual_servoing.of_y;}
 
     // Low-pass filter the raw optic flow signal
-    Bound(visual_servoing.lp_const, 0.001f, 100.f);
-    float lp_factor_of = visual_servoing.dt / (visual_servoing.lp_const / sqrt(visual_servoing.color_count));
-    Bound(lp_factor_of, 0.f, 1.f);
-
-    visual_servoing.of_y += (visual_servoing.raw_of_y - visual_servoing.of_y) * lp_factor_of;
+    visual_servoing.of_y = visual_servoing.lp_of_b0 * visual_servoing.raw_of_y + visual_servoing.lp_of_b1 * visual_servoing.prev_raw_of_y_1
+    + visual_servoing.lp_of_b2 * visual_servoing.prev_raw_of_y_2 - visual_servoing.lp_of_a1 * visual_servoing.prev_of_y_1 - visual_servoing.lp_of_a2 * visual_servoing.prev_of_y_2;
 
     // Compute derivative of filtered optic flow
-    visual_servoing.raw_of_y_d = (visual_servoing.of_y - visual_servoing.prev_of_y) / visual_servoing.dt;
+    visual_servoing.raw_of_y_d = (visual_servoing.of_y - visual_servoing.prev_of_y_1) / visual_servoing.dt;
 
     // Low-pass filter optic flow derivative
     float lp_factor_of_d = visual_servoing.dt / 0.02f;
@@ -421,7 +436,13 @@ void visual_servoing_module_run(bool in_flight)
     
     // update for the next iteration
     visual_servoing.prev_box_centroid_y = visual_servoing.box_centroid_y;
-    visual_servoing.prev_of_y = visual_servoing.of_y;
+    // Shift input history
+    visual_servoing.prev_raw_of_y_2 = visual_servoing.prev_raw_of_y_1;
+    visual_servoing.prev_raw_of_y_1 = visual_servoing.raw_of_y;
+
+    // Shift output history
+    visual_servoing.prev_of_y_2 = visual_servoing.prev_of_y_1;
+    visual_servoing.prev_of_y_1 = visual_servoing.of_y;
   }
 
   // Extrapolate distance estimate
@@ -455,8 +476,8 @@ void visual_servoing_module_run(bool in_flight)
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
-    // visual_servoing.mu_x = 0.0;
+    // visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    visual_servoing.mu_x = 0.0;
     Bound(visual_servoing.mu_x, -0.4f, 0.4f);
   }
 
@@ -478,9 +499,10 @@ void visual_servoing_module_run(bool in_flight)
 
   // Always control y and z with vision
   // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
-  visual_servoing.mu_y = - visual_servoing.ol_y_pgain * visual_servoing.of_y - visual_servoing.ol_y_dgain * visual_servoing.of_y_d;
-  // visual_servoing.mu_y = 0.0;
+  // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * visual_servoing.of_y - visual_servoing.ol_y_dgain * visual_servoing.of_y_d;
+  visual_servoing.mu_y = 0.0;
   visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + 10) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
+
 
   if (!landing){
     // set the desired thrust
