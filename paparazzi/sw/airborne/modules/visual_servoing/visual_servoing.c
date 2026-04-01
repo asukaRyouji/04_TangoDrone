@@ -190,6 +190,10 @@ static float divergence_step(float switch_time, float magnitude);
 
 static float reset_switch_time_end(float switch_time_end);
 
+static void visual_servoing_kf_init(float of_meas, float ofd_meas);
+
+static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt);
+
 /*
  * Initialisation function
  */
@@ -243,19 +247,34 @@ void visual_servoing_module_init(void)
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
-  visual_servoing.lp_const_of = 0;
   visual_servoing.raw_of_y_d = 0;
   visual_servoing.of_y_d = 0;
   visual_servoing.prev_box_centroid_y = 0;
-  visual_servoing.prev_of_y_1 = 0;
-  visual_servoing.prev_of_y_2 = 0;
-  visual_servoing.prev_raw_of_y_1 = 0;
-  visual_servoing.prev_raw_of_y_2 = 0;
-  visual_servoing.lp_of_b0 = 0.20657208f;
-  visual_servoing.lp_of_b1 = 0.41314416f;
-  visual_servoing.lp_of_b2 = 0.20657208f;
-  visual_servoing.lp_of_a1 = -0.36952737f;
-  visual_servoing.lp_of_a2 = 0.195815712f;
+  visual_servoing.prev_of_y = 0;
+  visual_servoing.prev_raw_of_y = 0;
+  //kalman filter
+  visual_servoing.kf_x1 = 0.0f;
+  visual_servoing.kf_x2 = 0.0f;
+  visual_servoing.kf_x1_pred = 0.0f;
+  visual_servoing.kf_x2_pred = 0.0f;
+
+  visual_servoing.kf_p11 = 1.0f;
+  visual_servoing.kf_p12 = 0.0f;
+  visual_servoing.kf_p21 = 0.0f;
+  visual_servoing.kf_p22 = 1.0f;
+
+  visual_servoing.kf_q11 = 0.001f;
+  visual_servoing.kf_q22 = 0.05f;
+
+  visual_servoing.kf_r11 = 0.0018f;
+  visual_servoing.kf_r22 = 0.1522f;
+
+  visual_servoing.kf_initialized = FALSE;
+  visual_servoing.lp_of_b0 = 0.46515307f;
+  visual_servoing.lp_of_b1 = 0.93030615f;
+  visual_servoing.lp_of_b2 = 0.46515307f;
+  visual_servoing.lp_of_a1 = 0.6202041028f;
+  visual_servoing.lp_of_a2 = 0.240408205f;
 
   // bind our colorfilter callbacks to receive the color filter outputs
   AbiBindMsgVISUAL_DETECTION(ORANGE_AVOIDER_VISUAL_DETECTION_ID, &color_detection_ev, color_detection_cb);
@@ -300,19 +319,35 @@ static void reset_all_vars(void)
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
-  visual_servoing.lp_const_of = 0;
   visual_servoing.raw_of_y_d = 0;
   visual_servoing.of_y_d = 0;
   visual_servoing.prev_box_centroid_y = 0;
-  visual_servoing.prev_of_y_1 = 0;
-  visual_servoing.prev_of_y_2 = 0;
-  visual_servoing.prev_raw_of_y_1 = 0;
-  visual_servoing.prev_raw_of_y_2 = 0;
-  visual_servoing.lp_of_b0 = 0.20657208f;
-  visual_servoing.lp_of_b1 = 0.41314416f;
-  visual_servoing.lp_of_b2 = 0.20657208f;
-  visual_servoing.lp_of_a1 = -0.36952737f;
-  visual_servoing.lp_of_a2 = 0.195815712f;
+  visual_servoing.prev_of_y = 0;
+  visual_servoing.prev_raw_of_y = 0;
+
+  //kalman filter
+  visual_servoing.kf_x1 = 0.0f;
+  visual_servoing.kf_x2 = 0.0f;
+  visual_servoing.kf_x1_pred = 0.0f;
+  visual_servoing.kf_x2_pred = 0.0f;
+
+  visual_servoing.kf_p11 = 1.0f;
+  visual_servoing.kf_p12 = 0.0f;
+  visual_servoing.kf_p21 = 0.0f;
+  visual_servoing.kf_p22 = 1.0f;
+
+  visual_servoing.kf_q11 = 0.001f;
+  visual_servoing.kf_q22 = 0.05f;
+
+  visual_servoing.kf_r11 = 0.0018f;
+  visual_servoing.kf_r22 = 0.1522f;
+
+  visual_servoing.kf_initialized = FALSE;
+  visual_servoing.lp_of_b0 = 0.46515307f;
+  visual_servoing.lp_of_b1 = 0.93030615f;
+  visual_servoing.lp_of_b2 = 0.46515307f;
+  visual_servoing.lp_of_a1 = 0.6202041028f;
+  visual_servoing.lp_of_a2 = 0.240408205f;
   vs_enable_time = (float)get_sys_time_usec() / 1e6;
   landing = FALSE;
   switch_time_start = 0.0;
@@ -416,34 +451,39 @@ void visual_servoing_module_run(bool in_flight)
     // update control errors
     update_errors(visual_servoing.box_centroid_x, visual_servoing.box_centroid_y, visual_servoing.div_err, visual_servoing.dt);
 
+
     // Compute optic flow
     if (last_color_count && visual_servoing.color_count != 0){
       visual_servoing.raw_of_y = (visual_servoing.box_centroid_y - visual_servoing.prev_box_centroid_y) / visual_servoing.dt;
     }
     else {visual_servoing.raw_of_y = visual_servoing.of_y;}
 
-    // Low-pass filter the raw optic flow signal
-    visual_servoing.of_y = visual_servoing.lp_of_b0 * visual_servoing.raw_of_y + visual_servoing.lp_of_b1 * visual_servoing.prev_raw_of_y_1
-    + visual_servoing.lp_of_b2 * visual_servoing.prev_raw_of_y_2 - visual_servoing.lp_of_a1 * visual_servoing.prev_of_y_1 - visual_servoing.lp_of_a2 * visual_servoing.prev_of_y_2;
+    // Raw OF derivative from raw OF
+    visual_servoing.raw_of_y_d =
+      (visual_servoing.raw_of_y - visual_servoing.prev_raw_of_y) / visual_servoing.dt;
 
-    // Compute derivative of filtered optic flow
-    visual_servoing.raw_of_y_d = (visual_servoing.of_y - visual_servoing.prev_of_y_1) / visual_servoing.dt;
+    // Initialize or update Kalman filter
+    if (!visual_servoing.kf_initialized) {
+      visual_servoing_kf_init(visual_servoing.raw_of_y, visual_servoing.raw_of_y_d);
+    } else {
+      visual_servoing_kf_update(visual_servoing.raw_of_y,
+                                visual_servoing.raw_of_y_d,
+                                visual_servoing.dt);
+    }
 
-    // Low-pass filter optic flow derivative
-    float lp_factor_of_d = visual_servoing.dt / 0.02f;
-    Bound(lp_factor_of_d, 0.f, 1.f);
-    visual_servoing.of_y_d += (visual_servoing.raw_of_y_d - visual_servoing.of_y_d) * lp_factor_of_d;
+    // Filtered estimates
+    visual_servoing.of_y   = visual_servoing.kf_x1;
+    visual_servoing.of_y_d = visual_servoing.kf_x2;
     
     // update for the next iteration
     visual_servoing.prev_box_centroid_y = visual_servoing.box_centroid_y;
     // Shift input history
-    visual_servoing.prev_raw_of_y_2 = visual_servoing.prev_raw_of_y_1;
-    visual_servoing.prev_raw_of_y_1 = visual_servoing.raw_of_y;
+    visual_servoing.prev_raw_of_y = visual_servoing.raw_of_y;
 
     // Shift output history
-    visual_servoing.prev_of_y_2 = visual_servoing.prev_of_y_1;
-    visual_servoing.prev_of_y_1 = visual_servoing.of_y;
+    visual_servoing.prev_of_y = visual_servoing.of_y;
   }
+
 
   // Extrapolate distance estimate
   visual_servoing.distance_est = switch_distance * expf(-visual_servoing.divergence_sp * time_since_last);
@@ -587,6 +627,115 @@ void final_land_in_box(float start_time)
   if (d_time > 7.00f){
     autopilot_set_kill_throttle(true);
   }
+}
+
+/**
+ * Kalman filter for optic flow PD reconstruction 
+ */
+
+static void visual_servoing_kf_init(float of_meas, float ofd_meas)
+{
+  visual_servoing.kf_x1 = of_meas;
+  visual_servoing.kf_x2 = ofd_meas;
+
+  visual_servoing.kf_x1_pred = of_meas;
+  visual_servoing.kf_x2_pred = ofd_meas;
+
+  visual_servoing.kf_p11 = 1.0f;
+  visual_servoing.kf_p12 = 0.0f;
+  visual_servoing.kf_p21 = 0.0f;
+  visual_servoing.kf_p22 = 1.0f;
+
+  visual_servoing.kf_initialized = TRUE;
+}
+
+static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt)
+{
+  if (dt < 1e-5f) {
+    return;
+  }
+
+  // State transition A = [1 dt; 0 1]
+  const float A11 = 1.0f;
+  const float A12 = dt;
+  const float A21 = 0.0f;
+  const float A22 = 1.0f;
+
+  // Current state
+  const float x1 = visual_servoing.kf_x1;
+  const float x2 = visual_servoing.kf_x2;
+
+  // Predict state
+  const float x1_pred = A11 * x1 + A12 * x2;
+  const float x2_pred = A21 * x1 + A22 * x2;
+
+  visual_servoing.kf_x1_pred = x1_pred;
+  visual_servoing.kf_x2_pred = x2_pred;
+
+  // Predict covariance: P_pred = A P A' + Q
+  const float p11 = visual_servoing.kf_p11;
+  const float p12 = visual_servoing.kf_p12;
+  const float p21 = visual_servoing.kf_p21;
+  const float p22 = visual_servoing.kf_p22;
+
+  const float ap11 = A11*p11 + A12*p21;
+  const float ap12 = A11*p12 + A12*p22;
+  const float ap21 = A21*p11 + A22*p21;
+  const float ap22 = A21*p12 + A22*p22;
+
+  float p11_pred = ap11*A11 + ap12*A12 + visual_servoing.kf_q11;
+  float p12_pred = ap11*A21 + ap12*A22;
+  float p21_pred = ap21*A11 + ap22*A12;
+  float p22_pred = ap21*A21 + ap22*A22 + visual_servoing.kf_q22;
+
+  // Measurement z = [of_meas; ofd_meas], H = I
+  const float y1 = of_meas  - x1_pred;
+  const float y2 = ofd_meas - x2_pred;
+
+  // S = P_pred + R
+  const float s11 = p11_pred + visual_servoing.kf_r11;
+  const float s12 = p12_pred;
+  const float s21 = p21_pred;
+  const float s22 = p22_pred + visual_servoing.kf_r22;
+
+  const float detS = s11*s22 - s12*s21;
+  if (fabsf(detS) < 1e-12f) {
+    // Fallback: keep prediction
+    visual_servoing.kf_x1 = x1_pred;
+    visual_servoing.kf_x2 = x2_pred;
+    visual_servoing.kf_p11 = p11_pred;
+    visual_servoing.kf_p12 = p12_pred;
+    visual_servoing.kf_p21 = p21_pred;
+    visual_servoing.kf_p22 = p22_pred;
+    return;
+  }
+
+  // inv(S)
+  const float invS11 =  s22 / detS;
+  const float invS12 = -s12 / detS;
+  const float invS21 = -s21 / detS;
+  const float invS22 =  s11 / detS;
+
+  // K = P_pred * inv(S)
+  const float K11 = p11_pred*invS11 + p12_pred*invS21;
+  const float K12 = p11_pred*invS12 + p12_pred*invS22;
+  const float K21 = p21_pred*invS11 + p22_pred*invS21;
+  const float K22 = p21_pred*invS12 + p22_pred*invS22;
+
+  // Update state
+  visual_servoing.kf_x1 = x1_pred + K11*y1 + K12*y2;
+  visual_servoing.kf_x2 = x2_pred + K21*y1 + K22*y2;
+
+  // Update covariance: P = (I - K) P_pred   since H = I
+  const float IK11 = 1.0f - K11;
+  const float IK12 =      - K12;
+  const float IK21 =      - K21;
+  const float IK22 = 1.0f - K22;
+
+  visual_servoing.kf_p11 = IK11*p11_pred + IK12*p21_pred;
+  visual_servoing.kf_p12 = IK11*p12_pred + IK12*p22_pred;
+  visual_servoing.kf_p21 = IK21*p11_pred + IK22*p21_pred;
+  visual_servoing.kf_p22 = IK21*p12_pred + IK22*p22_pred;
 }
 
 /**
