@@ -263,7 +263,7 @@ void visual_servoing_module_init(void)
   visual_servoing.kf_p21 = 0.0f;
   visual_servoing.kf_p22 = 1.0f;
 
-  visual_servoing.kf_q11 = 0.001f;
+  visual_servoing.kf_q11 = 0.0010f;
   visual_servoing.kf_q22 = 0.05f;
 
   visual_servoing.kf_r11 = 0.0018f;
