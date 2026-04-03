@@ -61,7 +61,7 @@
     <include>
       <uri>model://moving_flower</uri>
       <name>moving_flower</name>
-      <pose>0.0 1.0 1.1 0 0 -1.571</pose>
+      <pose>-0.3 1.0 1.1 0 0 -1.571</pose>
     </include>
 
     <plugin name="pose_logger" filename="/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/pose_logger_plugin/build/libpose_logger_plugin.so">

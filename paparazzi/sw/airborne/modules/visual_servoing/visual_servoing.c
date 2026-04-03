@@ -6,8 +6,8 @@
  */
 /**
  * @file "modules/visual_servoing/visual_servoing.c"
- * @author Sander Hazelaar
- * This module is used for the thesis project: "Adaptive Visual Servoing Control for Quadrotors: A Bio-inspired Strategy Using Active Vision"
+ * @author Chenyao Wang
+ * This module is used for the thesis project: 04_TangoDrone
  */
 
 #include <math.h>
@@ -266,8 +266,8 @@ void visual_servoing_module_init(void)
   visual_servoing.kf_q11 = 0.0010f;
   visual_servoing.kf_q22 = 0.05f;
 
-  visual_servoing.kf_r11 = 0.0018f;
-  visual_servoing.kf_r22 = 0.1522f;
+  visual_servoing.kf_r11 = 0.0050f;
+  visual_servoing.kf_r22 = 0.5000f;
 
   visual_servoing.kf_initialized = FALSE;
   visual_servoing.lp_of_b0 = 0.46515307f;
@@ -339,8 +339,8 @@ static void reset_all_vars(void)
   visual_servoing.kf_q11 = 0.001f;
   visual_servoing.kf_q22 = 0.05f;
 
-  visual_servoing.kf_r11 = 0.0018f;
-  visual_servoing.kf_r22 = 0.1522f;
+  visual_servoing.kf_r11 = 0.0050f;
+  visual_servoing.kf_r22 = 0.5000f;
 
   visual_servoing.kf_initialized = FALSE;
   visual_servoing.lp_of_b0 = 0.46515307f;
@@ -516,8 +516,8 @@ void visual_servoing_module_run(bool in_flight)
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    // visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
-    visual_servoing.mu_x = 0.0;
+    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    // visual_servoing.mu_x = 0.0;
     Bound(visual_servoing.mu_x, -0.4f, 0.4f);
   }
 
@@ -540,7 +540,8 @@ void visual_servoing_module_run(bool in_flight)
   // Always control y and z with vision
   // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
   // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * visual_servoing.of_y - visual_servoing.ol_y_dgain * visual_servoing.of_y_d;
-  visual_servoing.mu_y = 0.0;
+  float freq = 0.3f;
+  visual_servoing.mu_y = 0.3 * 4 * M_PI * M_PI * freq * freq * cosf(2* M_PI * vs_time * freq);
   visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + 10) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
 
 
