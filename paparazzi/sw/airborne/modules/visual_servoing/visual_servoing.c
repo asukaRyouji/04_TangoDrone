@@ -48,24 +48,28 @@
 #define VS_OL_X_PGAIN 3
 #endif
 
-#ifndef VS_OL_Y_PGAIN
-#define VS_OL_Y_PGAIN 0.015
+#ifndef VS_OL_X_IGAIN
+#define VS_OL_X_IGAIN 0.015
+#endif
+
+#ifndef VS_OL_Y_OF_GAIN
+#define VS_OL_Y_OF_GAIN 4.71
+#endif
+
+#ifndef VS_OL_Y_YAW_GAIN
+#define VS_OL_Y_YAW_GAIN 3.14
 #endif
 
 #ifndef VS_OL_Z_PGAIN
-#define VS_OL_Z_PGAIN 0.01
-#endif
-
-#ifndef VS_OL_Y_DGAIN
-#define VS_OL_Y_DGAIN 0.015
+#define VS_OL_Z_PGAIN 0.005
 #endif
 
 #ifndef VS_OL_Z_DGAIN
-#define VS_OL_Z_DGAIN 0.002
+#define VS_OL_Z_DGAIN 0.0002
 #endif
 
-#ifndef VS_OL_X_IGAIN
-#define VS_OL_X_IGAIN 0.015
+#ifndef VS_OL_Z_PFF
+#define VS_OL_Z_PFF 10.0
 #endif
 
 #ifndef VS_LP_CONST
@@ -209,12 +213,13 @@ void visual_servoing_module_init(void)
   visual_servoing.divergence = 0;
   visual_servoing.true_divergence = 0;
   visual_servoing.raw_divergence = 0;
-  visual_servoing.ol_x_pgain = VS_OL_X_PGAIN;                    
-  visual_servoing.ol_y_pgain = VS_OL_Y_PGAIN; 
-  visual_servoing.ol_z_pgain = VS_OL_Z_PGAIN;                   
-  visual_servoing.ol_y_dgain = VS_OL_Y_DGAIN;                   
+  visual_servoing.ol_x_pgain = VS_OL_X_PGAIN;
+  visual_servoing.ol_x_igain = VS_OL_X_IGAIN;                     
+  visual_servoing.ol_y_OF_gain = VS_OL_Y_OF_GAIN;
+  visual_servoing.ol_y_YAW_gain = VS_OL_Y_YAW_GAIN;   
+  visual_servoing.ol_z_pgain = VS_OL_Z_PGAIN;                            
   visual_servoing.ol_z_dgain = VS_OL_Z_DGAIN;             
-  visual_servoing.ol_x_igain = VS_OL_X_IGAIN;             
+  visual_servoing.ol_z_pff = VS_OL_Z_PFF;        
   visual_servoing.previous_box_x_err = 0;
   visual_servoing.box_x_err_sum = 0;
   visual_servoing.box_x_err_d = 0;
@@ -275,6 +280,8 @@ void visual_servoing_module_init(void)
   visual_servoing.lp_of_b2 = 0.46515307f;
   visual_servoing.lp_of_a1 = 0.6202041028f;
   visual_servoing.lp_of_a2 = 0.240408205f;
+
+  visual_servoing.yaw_vel = 0.0f;
 
   // bind our colorfilter callbacks to receive the color filter outputs
   AbiBindMsgVISUAL_DETECTION(ORANGE_AVOIDER_VISUAL_DETECTION_ID, &color_detection_ev, color_detection_cb);
@@ -348,6 +355,9 @@ static void reset_all_vars(void)
   visual_servoing.lp_of_b2 = 0.46515307f;
   visual_servoing.lp_of_a1 = 0.6202041028f;
   visual_servoing.lp_of_a2 = 0.240408205f;
+
+  visual_servoing.yaw_vel = 0.0f;
+
   vs_enable_time = (float)get_sys_time_usec() / 1e6;
   landing = FALSE;
   switch_time_start = 0.0;
@@ -368,6 +378,7 @@ void visual_servoing_module_run(bool in_flight)
   // attitude->theta += visual_servoing.theta_offset;
   struct NedCoor_f *position = stateGetPositionNed_f();
   struct NedCoor_f *speed = stateGetSpeedNed_f();
+  struct FloatRates *rates = stateGetBodyRates_f();
 
   // Integral of pitch angle
   visual_servoing.pitch_sum += attitude->theta;
@@ -516,8 +527,8 @@ void visual_servoing_module_run(bool in_flight)
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
-    // visual_servoing.mu_x = 0.0;
+    // visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    visual_servoing.mu_x = 0.0;
     Bound(visual_servoing.mu_x, -0.4f, 0.4f);
   }
 
@@ -539,10 +550,14 @@ void visual_servoing_module_run(bool in_flight)
 
   // Always control y and z with vision
   // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
-  // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * visual_servoing.of_y - visual_servoing.ol_y_dgain * visual_servoing.of_y_d;
-  float freq = 0.3f;
-  visual_servoing.mu_y = 0.3 * 4 * M_PI * M_PI * freq * freq * cosf(2* M_PI * vs_time * freq);
-  visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + 10) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
+  float of_y_p_input = 0.005 * visual_servoing.of_y;
+  float of_y_d_input = 0.005 * visual_servoing.of_y_d;
+  visual_servoing.yaw_vel = rates->r;
+  visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
+  // Bound(visual_servoing.mu_y, -20.0f, 20.0f);
+  // float freq = 0.5f;
+  // visual_servoing.mu_y = 0.3 * 4 * M_PI * M_PI * freq * freq * cosf(2* M_PI * vs_time * freq);
+  visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + visual_servoing.ol_z_pff) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
 
 
   if (!landing){

@@ -98,11 +98,12 @@
       <define name="NOM_THROTTLE" value="0.66"/>
       <define name="SET_POINT" value="0.0"/>
       <define name="OL_X_PGAIN" value="3"/>
-      <define name="OL_Y_PGAIN" value="0.015"/>
-      <define name="OL_Z_PGAIN" value="0.01"/>
-      <define name="OL_Y_DGAIN" value="0.015"/>
-      <define name="OL_Z_DGAIN" value="0.005"/>
       <define name="OL_X_IGAIN" value="0.015"/>
+      <define name="OL_Y_OF_GAIN" value="3.140"/>
+      <define name="OL_Y_YAW_GAIN" value="3.140"/>
+      <define name="OL_Z_PGAIN" value="0.005"/>
+      <define name="OL_Z_DGAIN" value="0.0003"/>      
+      <define name="OL_Z_PFF" value="10.0"/>
       <define name="LP_CONST" value="12"/>
       <define name="SWITCH_MAGNITUDE" value="1.2"/>
       <!-- define name="SWITCH_MAGNITUDE" value="1.5"/ -->

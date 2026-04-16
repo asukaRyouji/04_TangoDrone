@@ -6,8 +6,8 @@
  */
 /**
  * @file "modules/visual_servoing/visual_servoing.c"
- * @author Sander Hazelaar
- * This module is used for the thesis project: "Adaptive Visual Servoing Control for Quadrotors: A Bio-inspired Strategy Using Active Vision"
+ * @author Chenyao Wang
+ * This module is used for the thesis project: 04_TangoDrone
  */
 
 #ifndef VISUAL_SERVOING_H
@@ -27,12 +27,13 @@ struct VisualServoing {
   float divergence;
   float raw_divergence;
   float true_divergence;
-  float ol_x_pgain;                    
-  float ol_y_pgain;   
-  float ol_z_pgain;                 
-  float ol_y_dgain;               
+  float ol_x_pgain;  
+  float ol_x_igain;                  
+  float ol_y_OF_gain;
+  float ol_y_YAW_gain;   
+  float ol_z_pgain;                               
   float ol_z_dgain;
-  float ol_x_igain;                             
+  float ol_z_pff;                             
   float box_centroid_x;                             
   float box_centroid_y;                             
   float previous_box_x_err;
@@ -100,6 +101,8 @@ struct VisualServoing {
   float lp_of_b2;
   float lp_of_a1;
   float lp_of_a2;
+  // angular rate 
+  float yaw_vel;
 };
 
 extern struct VisualServoing visual_servoing;
