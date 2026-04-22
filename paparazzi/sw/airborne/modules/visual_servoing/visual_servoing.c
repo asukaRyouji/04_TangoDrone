@@ -563,6 +563,7 @@ void visual_servoing_module_run(bool in_flight)
   }
 
   // Always control y and z with vision
+  // test git
   // visual_servoing.mu_y = - visual_servoing.ol_y_pgain * (visual_servoing.box_centroid_y - 2) - visual_servoing.ol_y_dgain * visual_servoing.box_y_err_d;
   float of_y_p_input = 0.005 * visual_servoing.of_y;
   float of_y_d_input = 0.005 * visual_servoing.of_y_d;
