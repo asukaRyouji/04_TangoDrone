@@ -20,4 +20,5 @@
     "esbonio.sphinx.confDir": "",
     "cmake.configureOnOpen": true,
     "C_Cpp.errorSquiggles": "enabled",
+    "cmake.sourceDirectory": "/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/TRICAL",
 }

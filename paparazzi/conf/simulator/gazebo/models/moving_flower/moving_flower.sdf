@@ -28,7 +28,7 @@
 
     <plugin name="flower_motion" filename="/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/flower_motion_plugin/build/libflower_motion.so">
       <amplitude>0.3</amplitude>
-      <frequency>0.5</frequency>
+      <frequency>1.00</frequency>
       <axis>x</axis>
       <start_delay>30.0</start_delay>
     </plugin>

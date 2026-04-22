@@ -42,6 +42,10 @@ struct VisualServoing {
   float previous_box_y_err;
   float box_y_err_sum;
   float box_y_err_d;
+  // z-axis position based controller
+  float height_setpoint;
+  float height_error;
+  float prev_height_error;
   float div_err;
   float previous_div_err;
   float div_err_sum;

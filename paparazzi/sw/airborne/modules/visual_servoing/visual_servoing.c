@@ -53,23 +53,31 @@
 #endif
 
 #ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 4.71
+#define VS_OL_Y_OF_GAIN 2.4
 #endif
 
 #ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 3.14
+#define VS_OL_Y_YAW_GAIN 2.4
 #endif
 
 #ifndef VS_OL_Z_PGAIN
-#define VS_OL_Z_PGAIN 0.005
+#define VS_OL_Z_PGAIN 7.5
 #endif
 
 #ifndef VS_OL_Z_DGAIN
-#define VS_OL_Z_DGAIN 0.0002
+#define VS_OL_Z_DGAIN 0.0075
 #endif
 
 #ifndef VS_OL_Z_PFF
 #define VS_OL_Z_PFF 10.0
+#endif
+
+#ifndef VS_OL_Z_SP
+#define VS_OL_Z_SP 1.1
+#endif
+
+#ifndef VS_OL_X_VEL_SP
+#define VS_OL_X_VEL_SP 0.0
 #endif
 
 #ifndef VS_LP_CONST
@@ -219,7 +227,10 @@ void visual_servoing_module_init(void)
   visual_servoing.ol_y_YAW_gain = VS_OL_Y_YAW_GAIN;   
   visual_servoing.ol_z_pgain = VS_OL_Z_PGAIN;                            
   visual_servoing.ol_z_dgain = VS_OL_Z_DGAIN;             
-  visual_servoing.ol_z_pff = VS_OL_Z_PFF;        
+  visual_servoing.ol_z_pff = VS_OL_Z_PFF;
+  visual_servoing.height_setpoint = VS_OL_Z_SP;
+  visual_servoing.height_error = 0;
+  visual_servoing.prev_height_error = 0;       
   visual_servoing.previous_box_x_err = 0;
   visual_servoing.box_x_err_sum = 0;
   visual_servoing.box_x_err_d = 0;
@@ -247,7 +258,7 @@ void visual_servoing_module_init(void)
   visual_servoing.pid_on = 2;
   visual_servoing.time_since_last = 0.0;
   visual_servoing.vel_x = 0;
-  visual_servoing.vel_x_sp = -0.02;
+  visual_servoing.vel_x_sp = VS_OL_X_VEL_SP;
   visual_servoing.Kp_vx = 0.52;
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
@@ -305,6 +316,9 @@ static void reset_all_vars(void)
   visual_servoing.previous_box_y_err = 0;
   visual_servoing.box_y_err_sum = 0;
   visual_servoing.box_y_err_d = 0;
+  visual_servoing.height_setpoint = VS_OL_Z_SP;
+  visual_servoing.height_error = 0;
+  visual_servoing.prev_height_error = 0;      
   visual_servoing.div_err = 0;
   visual_servoing.previous_div_err = 0;
   visual_servoing.div_err_sum = 0;
@@ -321,7 +335,7 @@ static void reset_all_vars(void)
   visual_servoing.i_output = 0;
   visual_servoing.pid_on = 0;
   visual_servoing.vel_x = 0;
-  visual_servoing.vel_x_sp = -0.02;
+  visual_servoing.vel_x_sp = VS_OL_X_VEL_SP;
   visual_servoing.Kp_vx = 0.52;
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.raw_of_y = 0;
@@ -527,8 +541,8 @@ void visual_servoing_module_run(bool in_flight)
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    // visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
-    visual_servoing.mu_x = 0.0;
+    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    // visual_servoing.mu_x = 0.0;
     Bound(visual_servoing.mu_x, -0.4f, 0.4f);
   }
 
@@ -553,11 +567,18 @@ void visual_servoing_module_run(bool in_flight)
   float of_y_p_input = 0.005 * visual_servoing.of_y;
   float of_y_d_input = 0.005 * visual_servoing.of_y_d;
   visual_servoing.yaw_vel = rates->r;
-  visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
-  // Bound(visual_servoing.mu_y, -20.0f, 20.0f);
-  // float freq = 0.5f;
-  // visual_servoing.mu_y = 0.3 * 4 * M_PI * M_PI * freq * freq * cosf(2* M_PI * vs_time * freq);
-  visual_servoing.mu_z = 9.81 + visual_servoing.ol_z_pgain * (visual_servoing.box_centroid_x + visual_servoing.ol_z_pff) + visual_servoing.ol_z_dgain * visual_servoing.box_x_err_d;
+  visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
+                         + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
+  Bound(visual_servoing.mu_y, -25.0f, 25.0f);
+  // float freq = 1.0f;
+  // float t_y = vs_time - vs_enable_time;
+  // visual_servoing.mu_y = 0.3f * 4.0f * M_PI * M_PI * freq * freq * cosf(2* M_PI * t_y * freq);
+  float height = -position->z;              // positive upward
+  float height_error = visual_servoing.height_setpoint - height;
+  float height_rate = -speed->z;            // positive upward climb rate
+
+  visual_servoing.height_error = height_error;
+  visual_servoing.mu_z = 9.81f + visual_servoing.ol_z_pgain * height_error - visual_servoing.ol_z_dgain * height_rate;
 
 
   if (!landing){
@@ -569,7 +590,7 @@ void visual_servoing_module_run(bool in_flight)
     pitch_sp = atan2f(visual_servoing.mu_x, visual_servoing.mu_z);
     roll_sp = asinf(mass * visual_servoing.mu_y/thrust_set);
     BoundAbs(pitch_sp, RadOfDeg(10.0));
-    BoundAbs(roll_sp, RadOfDeg(10.0));
+    BoundAbs(roll_sp, RadOfDeg(60.0));
   }
   else{
     final_land_in_box(end_time);
