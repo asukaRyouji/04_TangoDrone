@@ -30,7 +30,8 @@ struct VisualServoing {
   float ol_x_pgain;  
   float ol_x_igain;                  
   float ol_y_OF_gain;
-  float ol_y_YAW_gain;   
+  float ol_y_YAW_gain;
+  float ol_y_OA_gain;   
   float ol_z_pgain;                               
   float ol_z_dgain;
   float ol_z_pff;                             

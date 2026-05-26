@@ -193,7 +193,7 @@
         </inertia>
       </inertial>
       <sensor type="wideanglecamera" name="mt9f002">
-        <update_rate>15.0</update_rate><!-- adjust with MT9F002_TARGET_FPS -->
+        <update_rate>25.0</update_rate><!-- adjust with MT9F002_TARGET_FPS -->
         <camera>
           <image>
             <width>4608</width><!-- Full sensor resolution -->
