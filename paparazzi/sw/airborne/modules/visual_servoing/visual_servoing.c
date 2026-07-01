@@ -84,9 +84,9 @@
 #define VS_OL_X_VEL_PGAIN 10.00
 #endif
 
-// Should be slightly higher than the desired Vx (e.g. 0.023 voor 0.02)
+// Should be slightly higher than the desired Vx (e.g. 0.0225 voor 0.02)
 #ifndef VS_OL_X_VEL_SP
-#define VS_OL_X_VEL_SP -0.023
+#define VS_OL_X_VEL_SP -0.0225
 #endif
 
 #ifndef VS_LP_CONST
