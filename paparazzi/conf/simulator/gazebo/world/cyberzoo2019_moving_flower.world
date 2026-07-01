@@ -61,13 +61,13 @@
     <include>
       <uri>model://moving_flower</uri>
       <name>moving_flower</name>
-      <pose>-0.3 1.0 1.1 0 0 -1.571</pose>
+      <pose>0.0 1.0 1.1 0 0 -1.571</pose>
     </include>
 
     <plugin name="pose_logger" filename="/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/pose_logger_plugin/build/libpose_logger_plugin.so">
       <drone_model_name>bebop</drone_model_name>
       <flower_model_name>moving_flower</flower_model_name>
-      <log_path>/home/admin_user/Desktop/Gain_tuning/Static_delay/Flower_0.50Hz_0.0_delay/FPS_25/K_6.2/gzb_data</log_path>
+      <log_path>/home/admin_user/Desktop/Gain_tuning/Centering_approach/Vx_0.02/K_4.0/Init_0.4/gzb_data</log_path>
       <log_rate>500.0</log_rate>
     </plugin>
 

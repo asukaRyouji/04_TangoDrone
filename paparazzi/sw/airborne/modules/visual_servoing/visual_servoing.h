@@ -73,6 +73,7 @@ struct VisualServoing {
   float vel_x_sp;
   float Kp_vx;
   float mu_vx_ff;
+  float err_vx;
   // Optic flow PD calculation
   float raw_of_y;
   float of_y;

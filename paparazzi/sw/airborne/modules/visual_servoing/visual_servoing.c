@@ -53,11 +53,11 @@
 #endif
 
 #ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 6.2
+#define VS_OL_Y_OF_GAIN 4.0
 #endif
 
 #ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 6.2
+#define VS_OL_Y_YAW_GAIN 4.0
 #endif
 
 #ifndef VS_OL_Y_OA_GAIN
@@ -80,8 +80,13 @@
 #define VS_OL_Z_SP 1.1
 #endif
 
+#ifndef VS_OL_X_VEL_PGAIN
+#define VS_OL_X_VEL_PGAIN 10.00
+#endif
+
+// Should be slightly higher than the desired Vx (e.g. 0.023 voor 0.02)
 #ifndef VS_OL_X_VEL_SP
-#define VS_OL_X_VEL_SP 0.0
+#define VS_OL_X_VEL_SP -0.023
 #endif
 
 #ifndef VS_LP_CONST
@@ -119,7 +124,6 @@
 #ifndef VS_CC_THRESHOLD
 #define VS_CC_THRESHOLD 5000
 #endif
-
 // define and initialise global variables
 float fps = 0;
 float end_time = 0;
@@ -264,8 +268,9 @@ void visual_servoing_module_init(void)
   visual_servoing.time_since_last = 0.0;
   visual_servoing.vel_x = 0;
   visual_servoing.vel_x_sp = VS_OL_X_VEL_SP;
-  visual_servoing.Kp_vx = 0.52;
+  visual_servoing.Kp_vx = VS_OL_X_VEL_PGAIN;
   visual_servoing.mu_vx_ff = 0.0;
+  visual_servoing.err_vx = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
   visual_servoing.raw_of_y_d = 0;
@@ -341,8 +346,9 @@ static void reset_all_vars(void)
   visual_servoing.pid_on = 0;
   visual_servoing.vel_x = 0;
   visual_servoing.vel_x_sp = VS_OL_X_VEL_SP;
-  visual_servoing.Kp_vx = 0.52;
+  visual_servoing.Kp_vx = VS_OL_X_VEL_PGAIN;
   visual_servoing.mu_vx_ff = 0.0;
+  visual_servoing.err_vx = 0.0;
   visual_servoing.raw_of_y = 0;
   visual_servoing.of_y = 0;
   visual_servoing.raw_of_y_d = 0;
@@ -537,18 +543,19 @@ void visual_servoing_module_run(bool in_flight)
   // approach mode 3 for optic flow based sideway controller
   if (visual_servoing.approach_mode == 3){
     float ff_time = vs_time - vs_enable_time;
-    visual_servoing.vel_x = speed->x;
+    visual_servoing.vel_x = -speed->x;
     // 0.50 Hz dur 0.30 mag -0.08 Kp 0.52
     if (ff_time <= 0.30f && fabsf(visual_servoing.vel_x_sp) > 1e-5f){
-      visual_servoing.mu_vx_ff = -0.08f;
+      visual_servoing.mu_vx_ff = -0.02f;
     }
     else {
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * (visual_servoing.vel_x_sp - visual_servoing.vel_x);
+    visual_servoing.err_vx = visual_servoing.vel_x_sp - visual_servoing.vel_x;
+    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * visual_servoing.err_vx;
     // visual_servoing.mu_x = 0.0;
-    Bound(visual_servoing.mu_x, -0.4f, 0.4f);
+    Bound(visual_servoing.mu_x, -0.2f, 0.2f);
   }
 
   // else{
@@ -572,9 +579,18 @@ void visual_servoing_module_run(bool in_flight)
   float of_y_p_input = 0.005 * visual_servoing.of_y;
   float of_y_d_input = 0.005 * visual_servoing.of_y_d;
   visual_servoing.yaw_vel = rates->r;
-  visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
+
+  // Change the ffvx_time threshold to 0.0f when sideways-following moving flowers. This is only for self-centering when approaching
+  float ffvx_time = vs_time - vs_enable_time;
+  if (ffvx_time >= 0.50f){
+    visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
                          + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel
                          - visual_servoing.ol_y_OA_gain * visual_servoing.box_centroid_y;
+    }
+  else {
+    visual_servoing.mu_y = 0;
+  }
+  
   Bound(visual_servoing.mu_y, -25.0f, 25.0f);
   // float freq = 1.0f;
   // float t_y = vs_time - vs_enable_time;
