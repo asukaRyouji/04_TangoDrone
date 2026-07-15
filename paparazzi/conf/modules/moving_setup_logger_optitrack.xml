@@ -1,0 +1,26 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+
+<module name="moving_setup_logger_optitrack" dir="mission">
+
+  <doc>
+    <description>
+      Receive MOVING_SETUP_POS datalink messages onboard and store the latest
+      moving setup position for onboard CSV logging.
+    </description>
+  </doc>
+
+  <header>
+    <file name="moving_setup_logger_optitrack.h"/>
+  </header>
+
+  <init fun="moving_setup_logger_init()"/>
+
+  <datalink
+    message="MOVING_SETUP_POS"
+    fun="moving_setup_logger_parse_MOVING_SETUP_POS(buf)"/>
+
+  <makefile>
+    <file name="moving_setup_logger_optitrack.c"/>
+  </makefile>
+
+</module>

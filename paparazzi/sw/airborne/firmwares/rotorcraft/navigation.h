@@ -124,6 +124,8 @@ extern void nav_run(void);
 extern void nav_parse_BLOCK(uint8_t *buf);
 extern void nav_parse_MOVE_WP(uint8_t *buf);
 
+extern void nav_parse_MOVING_SETUP_POS(uint8_t *buf);
+
 extern void set_exception_flag(uint8_t flag_num);
 
 extern bool force_forward;

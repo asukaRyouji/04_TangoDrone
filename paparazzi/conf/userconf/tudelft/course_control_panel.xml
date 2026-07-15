@@ -163,8 +163,13 @@
         <arg flag="--x_angle_from_right"/>
         <arg flag="-23.0"/>
         <arg flag="--ac_nose" constant="right"/>
-        <arg flag="-ac" constant="2123"/>
+        <!-- OptiTrack rigid body 6324 = Bebop, Paparazzi aircraft ID = 45 -->
+        <arg flag="-ac" constant="6324"/>
         <arg flag="45"/>
+
+        <!-- OptiTrack rigid body 666 = moving setup; send it to Bebop AC_ID 45 -->
+        <arg flag="--setup_rigid_id" constant="666"/>
+        <arg flag="--setup_receiver_ac_id" constant="45"/>
       </program>
       <program name="Messages"/>
       <program name="Real-time Plotter">
@@ -173,15 +178,8 @@
         <arg flag="-u" constant="0.1"/>
         <arg flag="-c" constant="0.00"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:pitch_measured"/>
-        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:true_divergence"/>
-        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:divergence_sp"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:divergence"/>
-        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:mu_x"/>
-        <arg flag="-n"/>
-        <arg flag="-g" constant="800x250-0+0"/>
-        <arg flag="-t" constant="COMMAND"/>
-        <arg flag="-u" constant="0.1"/>
-        <arg flag="-c" constant="0.00"/>
+        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:divergence_sp"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:mu_x"/>
         <arg flag="-n"/>
         <arg flag="-g" constant="800x250-0+250"/>
@@ -202,6 +200,13 @@
         <arg flag="-c" constant="0"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:distance_est"/>
         <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:true_distance"/>
+        <arg flag="-n"/>
+        <arg flag="-g" constant="800x250-0+750"/>
+        <arg flag="-t" constant="OPTICFLOW"/>
+        <arg flag="-u" constant="0.1"/>
+        <arg flag="-c" constant="0"/>
+        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:of_y"/>
+        <arg flag="-c" constant="*:telemetry:VISUAL_SERVOING:of_y_d"/>
       </program>
       <program name="Real-time Plotter"/>
     </session>

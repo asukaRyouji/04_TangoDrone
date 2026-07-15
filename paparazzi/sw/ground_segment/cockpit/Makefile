@@ -123,14 +123,14 @@ clean:
 
 CC = gcc
 CFLAGS=-g -O2 -Wall $(shell pkg-config gtk+-2.0 --cflags) -fPIC
-LDFLAGS=$(shell pkg-config gtk+-2.0 --libs) -s -lglibivy -lm -lpcre
+LDFLAGS=$(shell pkg-config gtk+-2.0 --libs) -s -lglibivy -lm -lpcre $(shell pkg-config --libs libpcre2-8)
 
 
 ant_track : ant_track.c
 	$(CC) $(CFLAGS) -g -o $@ $^ $(LDFLAGS)
 
 ant_track_pmm : ant_track_pmm.c
-	$(CC) -g -O2 -Wall $(shell pkg-config gtk+-3.0 --cflags) -fPIC -g -o $@ $^ $(shell pkg-config gtk+-3.0 --libs) -s -lglibivy -lm -lpcre -rdynamic
+	$(CC) -g -O2 -Wall $(shell pkg-config gtk+-3.0 --cflags) -fPIC -g -o $@ $^ $(shell pkg-config gtk+-3.0 --libs) -s -lglibivy -lm -lpcre -rdynamic $(shell pkg-config --libs libpcre2-8)
 
 actuators : actuators.c
 	$(CC) $(CFLAGS) -g -o $@ $^ $(LDFLAGS)

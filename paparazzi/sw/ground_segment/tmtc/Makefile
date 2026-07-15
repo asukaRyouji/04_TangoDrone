@@ -106,10 +106,10 @@ ivy2serial : ivy2serial.cmo $(LIBPPRZCMA) $(LIBPPRZLINKCMA)
 CC = gcc
 
 GTK_CFLAGS  = $(shell pkg-config gtk+-2.0 --cflags) -DGTK_DISABLE_DEPRECATED
-GTK_LDFLAGS =  $(shell pkg-config gtk+-2.0 --libs) $(shell pcre-config --libs)
+GTK_LDFLAGS =  $(shell pkg-config gtk+-2.0 --libs) $(shell pkg-config --libs libpcre2-8)
 
 GLIBIVY_CFLAGS = -Wall -fPIC $(shell pkg-config --cflags ivy-glib)
-GLIBIVY_LDFLAGS = $(shell pkg-config --libs ivy-glib) $(shell pcre-config --libs)
+GLIBIVY_LDFLAGS = $(shell pkg-config --libs ivy-glib) $(shell pkg-config --libs libpcre2-8)
 
 #
 # try to find include locations on OSX
@@ -124,7 +124,7 @@ endif
 
 app_server: app_server.c Makefile
 	@echo OL $@
-	$(Q)$(CC) $(shell pkg-config libxml-2.0 gio-2.0 ivy-glib --cflags) -o $@ $< -lm -lz $(shell pkg-config libxml-2.0 gio-2.0 ivy-glib libpcre --libs)
+	$(Q)$(CC) $(shell pkg-config libxml-2.0 gio-2.0 ivy-glib --cflags) -o $@ $< -lm -lz $(shell pkg-config libxml-2.0 gio-2.0 ivy-glib --libs) $(shell pkg-config --libs libpcre2-8)
 
 gpsd2ivy: gpsd2ivy.c Makefile
 ifeq (, $(shell which gpsd))
