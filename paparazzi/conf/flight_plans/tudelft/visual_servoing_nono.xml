@@ -20,7 +20,7 @@ inline void setModule(void){
 </header>
   <waypoints>
     <waypoint lat="51.990634" lon="4.376789" name="HOME"/>
-    <waypoint name="2" x="-0.4" y="0.0" height="1."/>
+    <waypoint name="2" x="-0.2" y="0.0" height="1."/>
     <waypoint name="3" x="0.5" y="1.0" height="1.5"/>
     <waypoint name="4" x="-0.5" y="0.0" height="1."/>
     <waypoint name="5" x="2.0" y="-1.0" height="1.5"/>

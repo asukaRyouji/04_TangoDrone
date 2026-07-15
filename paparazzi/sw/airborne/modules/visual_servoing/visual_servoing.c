@@ -53,11 +53,11 @@
 #endif
 
 #ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 4.0
+#define VS_OL_Y_OF_GAIN 4.8
 #endif
 
 #ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 4.0
+#define VS_OL_Y_YAW_GAIN 4.8
 #endif
 
 #ifndef VS_OL_Y_OA_GAIN
@@ -84,7 +84,7 @@
 #define VS_OL_X_VEL_PGAIN 10.00
 #endif
 
-// Should be slightly higher than the desired Vx (e.g. 0.0225 voor 0.02)
+// Should be slightly higher than the desired Vx (e.g. 0.0225 voor 0.02, 0.0440 voor 0.04)
 #ifndef VS_OL_X_VEL_SP
 #define VS_OL_X_VEL_SP -0.0225
 #endif
