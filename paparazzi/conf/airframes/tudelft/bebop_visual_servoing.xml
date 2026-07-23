@@ -232,10 +232,10 @@
     <define name="G1_Q" value="0.0354"/>
     <define name="G1_R" value="0.0020"/>
     <define name="G2_R" value="0.1462"/> -->
-    <define name="G1_P" value="0.0333"/>
-    <define name="G1_Q" value="0.0252"/>
-    <define name="G1_R" value="0.0020"/>
-    <define name="G2_R" value="0.0589"/>
+    <define name="G1_P" value="0.0966"/>
+    <define name="G1_Q" value="0.0434"/>
+    <define name="G1_R" value="0.0033"/>
+    <define name="G2_R" value="0.2255"/>
   
 
     <define name="FILTER_ROLL_RATE" value="FALSE"/>
