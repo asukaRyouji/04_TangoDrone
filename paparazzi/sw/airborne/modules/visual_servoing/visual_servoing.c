@@ -86,7 +86,7 @@
 
 // Should be slightly higher than the desired Vx (e.g. 0.0225 voor 0.02, 0.0440 voor 0.04)
 #ifndef VS_OL_X_VEL_SP
-#define VS_OL_X_VEL_SP 0.0
+#define VS_OL_X_VEL_SP -0.0225
 #endif
 
 #ifndef VS_LP_CONST
@@ -541,9 +541,7 @@ void visual_servoing_module_run(bool in_flight)
   // }
 
   // approach mode 3 for optic flow based sideway controller
-  // approach mode 4 for forward motion self-centering
-  // approach mode 5 for self-oscillation self-centering
-  if (visual_servoing.approach_mode == 4){
+  if (visual_servoing.approach_mode == 3){
     float ff_time = vs_time - vs_enable_time;
     visual_servoing.vel_x = -speed->x;
     // 0.50 Hz dur 0.30 mag -0.08 Kp 0.52
@@ -582,21 +580,15 @@ void visual_servoing_module_run(bool in_flight)
   float of_y_d_input = 0.005 * visual_servoing.of_y_d;
   visual_servoing.yaw_vel = rates->r;
 
-  if (visual_servoing.approach_mode == 3){
-    visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
-                          + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
-  }
-
   // Change the ffvx_time threshold to 0.0f when sideways-following moving flowers. This is only for self-centering when approaching
-  if (visual_servoing.approach_mode == 4){
-    float ffvx_time = vs_time - vs_enable_time;
-    if (ffvx_time >= 0.50f){
-      visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
-                          + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
-      }
-    else {
-      visual_servoing.mu_y = 0;
+  float ffvx_time = vs_time - vs_enable_time;
+  if (ffvx_time >= 0.50f){
+    visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
+                         + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel
+                         - visual_servoing.ol_y_OA_gain * visual_servoing.box_centroid_y;
     }
+  else {
+    visual_servoing.mu_y = 0;
   }
   
   Bound(visual_servoing.mu_y, -25.0f, 25.0f);
