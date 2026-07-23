@@ -39,7 +39,7 @@ GLIB_CFLAGS  = -Wall -fPIC $(shell pkg-config glib-2.0 --cflags)
 GLIB_LDFLAGS = $(shell pkg-config glib-2.0 --libs)
 
 #GLIBIVY_CFLAGS  = -Wall -fPIC $(shell pkg-config --cflags ivy-glib)
-#GLIBIVY_LDFLAGS = $(shell pkg-config ivy-glib --libs) $(shell pkg-config --libs libpcre2-8)
+#GLIBIVY_LDFLAGS = $(shell pkg-config ivy-glib --libs)
 
 # apparently on OSX `sdl-config --libs` also has -lSDLmain which we don't want
 SDL_LDIRS = $(shell pkg-config sdl --libs-only-L)

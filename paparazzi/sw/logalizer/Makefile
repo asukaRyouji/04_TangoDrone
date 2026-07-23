@@ -108,14 +108,14 @@ openlog2tlm: openlog2tlm.c
 	$(Q)$(CC) $(CFLAGS) -o $@ $^
 
 DISP3D_CFLAGS = $(shell pkg-config --cflags ivy-glib gtk+-2.0 gtkgl-2.0)
-DISP3D_LDFLAGS = $(shell pkg-config --libs ivy-glib gtk+-2.0 gtkgl-2.0) $(shell pkg-config --libs libpcre2-8)
+DISP3D_LDFLAGS = $(shell pkg-config --libs ivy-glib gtk+-2.0 gtkgl-2.0) $(shell pcre-config --libs)
 
 disp3d: disp3d.c
 	@echo CC $@
 	$(Q)$(CC)  $(CFLAGS) $(DISP3D_CFLAGS) -o $@ $^ $(DISP3D_LDFLAGS)
 
 
-IVY_C_LIBS = $(shell pkg-config --libs ivy-glib) $(shell pkg-config --libs libpcre2-8)
+IVY_C_LIBS = $(shell pkg-config --libs ivy-glib) $(shell pcre-config --libs)
 GLIBIVY_CFLAGS = $(shell pkg-config --cflags ivy-glib)
 
 #

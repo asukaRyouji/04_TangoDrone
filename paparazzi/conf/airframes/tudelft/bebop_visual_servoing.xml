@@ -66,7 +66,6 @@
     <module name="ins" type="ext_pose"/>
     <!-- <module name="ins" type="extended"/> --> 
     <module name="logger_file"/>
-    <module name="moving_setup_logger_optitrack"/>
     
     <!-- Video/Camera modules -->
     <module name="bebop_cam"/>

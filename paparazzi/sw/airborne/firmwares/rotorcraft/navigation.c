@@ -48,6 +48,7 @@
 #include "pprzlink/messages.h"
 #include "mcu_periph/uart.h"
 
+
 PRINT_CONFIG_VAR(NAVIGATION_FREQUENCY)
 
 /** default nav_circle_radius in meters */

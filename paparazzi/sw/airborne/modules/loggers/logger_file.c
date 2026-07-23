@@ -36,10 +36,6 @@
 #include "mcu_periph/sys_time.h"
 #include "state.h"
 #include "generated/airframe.h"
-
-// For optitrack multi-object position logging by Chenyao
-#include "modules/mission/moving_setup_logger_optitrack.h"
-
 #ifdef COMMAND_THRUST
 #include "firmwares/rotorcraft/stabilization.h"
 #else
@@ -78,15 +74,6 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "dt,raw_divergence,color_count,");
   fprintf(file, "raw_of_y, of_y, raw_of_y_d, of_y_d, yaw_vel,");
   fprintf(file, "mu_x, mu_y, mu_z,");
-
-  /*
-   * Moving setup / flower setup received from OptiTrack id_num 666.
-   */
-  fprintf(file, "setup_valid,");
-  fprintf(file, "setup_target_id,setup_target_timestamp,setup_age_ms,");
-  fprintf(file, "setup_enu_x,setup_enu_y,setup_enu_z,");
-  fprintf(file, "setup_enu_xd,setup_enu_yd,setup_enu_zd,");
-
 #ifdef BOARD_BEBOP
   fprintf(file, "rpm_obs_1,rpm_obs_2,rpm_obs_3,rpm_obs_4,");
   fprintf(file, "rpm_ref_1,rpm_ref_2,rpm_ref_3,rpm_ref_4,");
@@ -124,30 +111,6 @@ static void logger_file_write_row(FILE *file) {
   fprintf(file, "%f,%f,%f,", visual_servoing.dt, visual_servoing.raw_divergence, visual_servoing.color_count);
   fprintf(file, "%f,%f,%f,%f,%f,", visual_servoing.raw_of_y, visual_servoing.of_y, visual_servoing.raw_of_y_d, visual_servoing.of_y_d, visual_servoing.yaw_vel);
   fprintf(file, "%f,%f,%f,", visual_servoing.mu_x, visual_servoing.mu_y, visual_servoing.mu_z);
-    /*
-   * Moving setup / flower setup data.
-   * This is the latest MOVING_SETUP_POS received onboard by the Bebop.
-   */
-  uint32_t now_ms = get_sys_time_msec();
-  uint32_t setup_age_ms = moving_setup.valid ? (now_ms - moving_setup.last_rx_time) : 0;
-  uint8_t setup_valid = moving_setup.valid ? 1 : 0;
-
-  fprintf(file, "%u,", setup_valid);
-
-  fprintf(file, "%u,%u,%u,",
-          moving_setup.target_id,
-          moving_setup.target_timestamp,
-          setup_age_ms);
-
-  fprintf(file, "%f,%f,%f,",
-          moving_setup.enu_x,
-          moving_setup.enu_y,
-          moving_setup.enu_z);
-
-  fprintf(file, "%f,%f,%f,",
-          moving_setup.enu_xd,
-          moving_setup.enu_yd,
-          moving_setup.enu_zd);
 #ifdef BOARD_BEBOP
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_obs[0],actuators_bebop.rpm_obs[1],actuators_bebop.rpm_obs[2],actuators_bebop.rpm_obs[3]);
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_ref[0],actuators_bebop.rpm_ref[1],actuators_bebop.rpm_ref[2],actuators_bebop.rpm_ref[3]);
@@ -162,8 +125,6 @@ static void logger_file_write_row(FILE *file) {
 #else
   fprintf(file, "%d,%d\n", h_ctl_aileron_setpoint, h_ctl_elevator_setpoint);
 #endif
-
-  fflush(file);
 }
 
 

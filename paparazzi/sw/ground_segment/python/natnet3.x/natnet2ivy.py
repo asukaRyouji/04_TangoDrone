@@ -178,17 +178,6 @@ parser.add_argument('-an', '--ac_nose', required=True, dest='ac_nose', choices=[
 parser.add_argument('-ac', action='append', nargs=2,
                     metavar=('rigid_id','ac_id'), required=True, help='pair of rigid body and A/C id (multiple possible)')
 
-# For moving set-up position logging, by Chenyao
-parser.add_argument('--setup_rigid_id', dest='setup_rigid_id',
-                    default=None,
-                    help='OptiTrack rigid body ID of the moving setup, e.g. 666')
-
-parser.add_argument('--setup_receiver_ac_id', dest='setup_receiver_ac_id',
-                    default=None,
-                    help='Paparazzi aircraft ID of the Bebop that should receive the setup position')
-
-
-
 parser.add_argument('-b', '--ivy_bus', dest='ivy_bus', help="Ivy bus address and port")
 parser.add_argument('-s', '--server', dest='server', default="127.0.0.1", help="NatNet server IP address")
 parser.add_argument('-m', '--multicast_addr', dest='multicast', default="239.255.42.99", help="NatNet server multicast address")
@@ -209,32 +198,14 @@ if args.ac is None:
     exit()
 
 # dictionary of ID associations
-# key: OptiTrack rigid body ID as string
-# value: Paparazzi aircraft ID as string
 id_dict = dict(args.ac)
 
-# Moving setup / target rigid body
-setup_rigid_id = str(args.setup_rigid_id) if args.setup_rigid_id is not None else None
-setup_receiver_ac_id = str(args.setup_receiver_ac_id) if args.setup_receiver_ac_id is not None else None
-
-if setup_rigid_id is not None and setup_receiver_ac_id is None:
-    print("If --setup_rigid_id is used, --setup_receiver_ac_id must also be provided")
-    exit()
-
-# IDs that this script should track from OptiTrack:
-# 1. normal aircraft bodies listed with -ac
-# 2. moving setup body listed with --setup_rigid_id
-tracked_ids = set(id_dict.keys())
-
-if setup_rigid_id is not None:
-    tracked_ids.add(setup_rigid_id)
-
-# initial time per OptiTrack rigid body ID
-timestamp = dict([(rigid_id, None) for rigid_id in tracked_ids])
+# initial time per AC
+timestamp = dict([(ac_id, None) for ac_id in id_dict.keys()])
 period = 1. / args.freq
 
-# initial track per OptiTrack rigid body ID
-track = dict([(rigid_id, deque()) for rigid_id in tracked_ids])
+# initial track per AC
+track = dict([(ac_id, deque()) for ac_id in id_dict.keys()])
 
 # Rotation for Z up if needed
 if args.up_axis == 'y_up':
@@ -280,11 +251,11 @@ else:
     ivy = IvyMessagesInterface("natnet2ivy")
 
 # store track function
-def store_track(rigid_id, pos, t):
-    if rigid_id in track.keys():
-        track[rigid_id].append((pos, t))
-        if len(track[rigid_id]) > args.vel_samples:
-            track[rigid_id].popleft()
+def store_track(ac_id, pos, t):
+    if ac_id in id_dict.keys():
+        track[ac_id].append((pos, t))
+        if len(track[ac_id]) > args.vel_samples:
+            track[ac_id].popleft()
 
 # compute velocity from track
 # returns zero if not enough samples
@@ -319,11 +290,7 @@ def receiveRigidBodyList( rigidBodyList, stamp ):
             continue
 
         i = str(ac_id)
-
-        # Ignore all OptiTrack rigid bodies except:
-        # 1. normal aircraft bodies listed with -ac
-        # 2. the moving setup body listed with --setup_rigid_id
-        if i not in tracked_ids:
+        if i not in id_dict.keys():
             continue
 
         store_track(i, pos, stamp)
@@ -338,42 +305,6 @@ def receiveRigidBodyList( rigidBodyList, stamp ):
         # Rotate position and velocity according to the quaternions found above
         pos = q_total.rotate([pos[0], pos[1], pos[2]])
         vel = q_total.rotate([vel[0], vel[1], vel[2]])
-
-        # If this rigid body is the moving setup, send it to the Bebop as target/setup position.
-        # Do NOT send it as EXTERNAL_POSE, otherwise the Bebop may interpret the setup as its own pose.
-        if setup_rigid_id is not None and i == setup_rigid_id:
-            msg = PprzMessage("datalink", "MOVING_SETUP_POS")
-
-            # Bebop aircraft ID. This is the receiver.
-            msg['ac_id'] = setup_receiver_ac_id
-
-            # Original OptiTrack rigid body ID, e.g. 666.
-            msg['target_id'] = int(setup_rigid_id)
-
-            # Timestamp in ms from NatNet stamp.
-            msg['timestamp'] = int(1000. * stamp)
-
-            # Position of the moving setup in the corrected ENU frame.
-            msg['enu_x'] = pos[0]
-            msg['enu_y'] = pos[1]
-            msg['enu_z'] = pos[2]
-
-            # Velocity of the moving setup in the corrected ENU frame.
-            msg['enu_xd'] = vel[0]
-            msg['enu_yd'] = vel[1]
-            msg['enu_zd'] = vel[2]
-
-            ivy.send(msg)
-
-            if args.verbose:
-                print("Sent MOVING_SETUP_POS: target_id=%s -> ac_id=%s pos=[%.3f %.3f %.3f] vel=[%.3f %.3f %.3f]" %
-                    (setup_rigid_id, setup_receiver_ac_id,
-                    pos[0], pos[1], pos[2],
-                    vel[0], vel[1], vel[2]))
-
-            # Very important:
-            # The moving setup should not continue into EXTERNAL_POSE.
-            continue
 
         # Rotate the attitude delta to the new frame
         quat = Quat(real=quat[3], imaginary=[quat[0], quat[1], quat[2]])
