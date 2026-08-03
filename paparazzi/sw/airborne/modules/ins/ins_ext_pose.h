@@ -34,7 +34,7 @@ Section 5.3: Non-additive noise formulation and equations
 
 #define EKF_NUM_STATES 15
 #define EKF_NUM_INPUTS 6
-#define EKF_NUM_OUTPUTS 6
+#define EKF_NUM_OUTPUTS 9
 
 #include "std.h"
 
@@ -51,6 +51,26 @@ extern void ins_ext_pose_msg_update(uint8_t *buf);
 // Logging
 extern void ins_ext_pos_log_header(FILE *file);
 extern void ins_ext_pos_log_data(FILE *file);
+
+extern bool ins_ext_pose_is_ready(void);
+extern bool ins_ext_pose_is_fresh(void);
+
+/*
+ * External-pose reception diagnostics.
+ * Updated whenever a valid EXTERNAL_POSE message for this aircraft arrives.
+ */
+extern float ins_ext_pose_raw_enu_x;
+extern float ins_ext_pose_raw_enu_y;
+extern float ins_ext_pose_raw_enu_z;
+
+extern float ins_ext_pose_raw_qi;
+extern float ins_ext_pose_raw_qx;
+extern float ins_ext_pose_raw_qy;
+extern float ins_ext_pose_raw_qz;
+
+extern uint32_t ins_ext_pose_rx_count;
+extern uint32_t ins_ext_pose_last_rx_usec;
+extern uint32_t ins_ext_pose_dt_usec;
 
 
 #endif

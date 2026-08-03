@@ -108,6 +108,44 @@ struct HorizontalGuidance {
 
 extern struct HorizontalGuidance guidance_h;
 
+/*
+ * Horizontal-guidance diagnostics.
+ *
+ * These expose the actual fixed-point terms used inside
+ * guidance_h_traj_run(). All command vectors use
+ * INT32_ANGLE_FRAC unless stated otherwise.
+ */
+extern struct Int32Vect2 guidance_h_pos_err;
+extern struct Int32Vect2 guidance_h_speed_err;
+extern struct Int32Vect2 guidance_h_trim_att_integrator;
+extern struct Int32Vect2 guidance_h_cmd_earth;
+
+/*
+ * Individual controller contributions.
+ */
+extern struct Int32Vect2 guidance_h_p_cmd_diag;
+extern struct Int32Vect2 guidance_h_d_cmd_diag;
+extern struct Int32Vect2 guidance_h_v_ff_cmd_diag;
+extern struct Int32Vect2 guidance_h_a_ff_cmd_diag;
+
+/*
+ * Command at important stages of the horizontal loop.
+ */
+extern struct Int32Vect2 guidance_h_cmd_pre_sat_diag;
+extern struct Int32Vect2 guidance_h_i_cmd_diag;
+extern struct Int32Vect2 guidance_h_cmd_after_i_diag;
+
+/*
+ * Controller execution and saturation diagnostics.
+ */
+extern uint32_t guidance_h_traj_count_diag;
+
+extern uint8_t guidance_h_traj_sat_x_diag;
+extern uint8_t guidance_h_traj_sat_y_diag;
+
+extern uint8_t guidance_h_final_sat_x_diag;
+extern uint8_t guidance_h_final_sat_y_diag;
+
 extern int32_t transition_percentage;
 
 extern void guidance_h_init(void);

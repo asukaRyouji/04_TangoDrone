@@ -42,7 +42,7 @@ inline void setModule(void){
     <waypoint name="22" x="1.5" y="-1.5" height="1."/>
     <waypoint name="23" x="2.0" y="-2.0" height="1."/>
     <waypoint name="CLIMB" x="1.9" y="1.0"/>
-    <waypoint name="STDBY" x="1.9" y="1.0"/>
+    <waypoint name="STDBY" x="1.9" y="1.0" height="1."/>
     <waypoint name="CSSTART" x="3.0" y="-0.968"/>
     <waypoint name="CSEND" x="0.3" y="3.68"/>
     <waypoint name="TD" x="0.8" y="-1.7"/>
@@ -96,7 +96,7 @@ inline void setModule(void){
       <call_once fun="NavResurrect()"/>
     </block>
     <block key="t" name="Takeoff" strip_button="Takeoff" strip_icon="takeoff.png">
-      <exception cond="GetPosAlt() @GT 0.8" deroute="Standby"/>
+      <exception cond="GetPosAlt() @GT 0.95" deroute="Standby"/>
       <call_once fun="NavSetWaypointHere(WP_CLIMB)"/>
       <stay climb="nav_climb_vspeed" vmode="climb" wp="CLIMB"/>
     </block>

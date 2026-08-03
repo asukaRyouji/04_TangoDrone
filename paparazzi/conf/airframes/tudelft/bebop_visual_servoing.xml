@@ -57,15 +57,16 @@
     <module name="gps" type="datalink"/>
     <module name="stabilization" type="indi_simple"/>
     <module name="stabilization" type="rate_indi"/>
-    <module name="ahrs" type="int_cmpl_quat">
-      <configure name="USE_MAGNETOMETER" value="FALSE"/>
-      <define name="AHRS_USE_GPS_HEADING" value="TRUE"/>
-      <!-- <define name="AHRS_BIAS_UPDATE_HEADING_THRESHOLD" value="360"/> -->
-    </module>
+    <!-- module name="ahrs" type="int_cmpl_quat" -->
+      <!--<configure name="USE_MAGNETOMETER" value="FALSE"/ -->
+      <!--<define name="AHRS_USE_GPS_HEADING" value="TRUE"/ -->
+    <!--</module -->
     <!-- Change it when using approach mode 1 and 2-->
     <module name="ins" type="ext_pose"/>
-    <!-- <module name="ins" type="extended"/> --> 
-    <module name="logger_file"/>
+    <!-- module name="ins" type="extended"/ --> 
+    <module name="logger_file">
+      <configure name="LOGGER_FILE_FREQUENCY" value="32"/>
+    </module>
     <module name="moving_setup_logger_optitrack"/>
     
     <!-- Video/Camera modules -->
@@ -100,13 +101,13 @@
       <define name="SET_POINT" value="0.0"/>
       <define name="OL_X_PGAIN" value="3"/>
       <define name="OL_X_IGAIN" value="0.015"/>
-      <define name="OL_X_VEL_SP" value="-0.02"/>
+      <define name="OL_X_VEL_SP" value="0.0"/>
       <define name="OL_Y_OF_GAIN" value="3.140"/>
       <define name="OL_Y_YAW_GAIN" value="3.140"/>
       <define name="OL_Z_PGAIN" value="5.0"/>
       <define name="OL_Z_DGAIN" value="0.005"/>      
       <define name="OL_Z_PFF" value="10.0"/>
-      <define name="OL_Z_SP" value="1.1"/>
+      <define name="OL_Z_SP" value="1.0"/>
       <define name="LP_CONST" value="12"/>
       <define name="SWITCH_MAGNITUDE" value="1.2"/>
       <!-- define name="SWITCH_MAGNITUDE" value="1.5"/ -->
@@ -198,6 +199,48 @@
     <define name="VFF_R_GPS" value="0.01"/>
   </section>
 
+  <section name="INS_EXT_POSE" prefix="INS_EXT_POSE_">
+    <!-- IMU process-noise covariance -->
+    <define name="Q_ACCEL" value="0.5"/>
+    <define name="Q_GYRO" value="0.01"/>
+
+    <!-- OptiTrack measurement-noise covariance -->
+    <define name="R_POS" value="0.00001"/>
+    <define name="R_VEL" value="0.01"/>
+    <define name="R_ATT" value="0.1"/>
+
+        <!-- Timing protection -->
+    <define name="MAX_DT" value="0.005"/>
+    <define name="TIMEOUT" value="0.10"/>
+    <define name="STAMP_RESET_TIMEOUT" value="1.0"/>
+
+    <!-- External-pose latency handling -->
+
+    <!-- Constant OptiTrack-to-aircraft delay.
+         Keep zero until independently measured. -->
+    <define name="FIXED_DELAY" value="0.0"/>
+
+    <!-- Keep zero for the first timing-validation test.
+         This means backlog detection works, but measurements
+         are not yet projected forward in time. -->
+    <define name="MAX_COMP_DELAY" value="0.0"/>
+
+    <!-- Reject a measurement when the estimated additional
+         queue/backlog delay exceeds 20 ms. -->
+    <define name="MAX_QUEUE_DELAY" value="0.02"/>
+
+    <define name="MIN_RX_INTERVAL" value="0.012"/>
+    <define name="RECOVERY_QUEUE_DELAY" value="0.005"/>
+
+    <!-- Bound the queue-delay estimator. -->
+    <define name="MAX_TRACKED_DELAY" value="0.25"/>
+
+    <!-- Covariance numerical protection -->
+    <define name="P_MIN" value="0.000000001"/>
+    <define name="P_MAX" value="1000.0"/>
+    <define name="P_RESET" value="1.0"/>
+  </section>
+
   <section name="RC_SETPOINT" prefix="STABILIZATION_ATTITUDE_">
     <!-- setpoint limits for attitude stabilization rc flight -->
     <define name="SP_MAX_PHI" value="45" unit="deg"/>
@@ -232,14 +275,14 @@
     <define name="G1_Q" value="0.0354"/>
     <define name="G1_R" value="0.0020"/>
     <define name="G2_R" value="0.1462"/> -->
-    <define name="G1_P" value="0.0333"/>
-    <define name="G1_Q" value="0.0252"/>
-    <define name="G1_R" value="0.0020"/>
-    <define name="G2_R" value="0.0589"/>
+    <define name="G1_P" value="0.1009"/>
+    <define name="G1_Q" value="0.0581"/>
+    <define name="G1_R" value="0.0037"/>
+    <define name="G2_R" value="0.2062"/>
   
 
-    <define name="FILTER_ROLL_RATE" value="FALSE"/>
-    <define name="FILTER_PITCH_RATE" value="FALSE"/>
+    <define name="FILTER_ROLL_RATE" value="TRUE"/>
+    <define name="FILTER_PITCH_RATE" value="TRUE"/>
 
     <!-- reference acceleration for attitude control -->
     <define name="REF_ERR_P" value="600.0"/>
@@ -253,7 +296,7 @@
     <define name="MAX_R" value="120.0" unit="deg/s"/>
 
     <!-- second order filter parameters -->
-    <define name="FILT_CUTOFF" value="8.0"/>
+    <define name="FILT_CUTOFF" value="10.0"/>
     <define name="ESTIMATION_FILT_CUTOFF" value="8.0"/>
 
     <!-- first order actuator dynamics -->

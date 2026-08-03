@@ -77,7 +77,7 @@
 #endif
 
 #ifndef VS_OL_Z_SP
-#define VS_OL_Z_SP 1.1
+#define VS_OL_Z_SP 1.0
 #endif
 
 #ifndef VS_OL_X_VEL_PGAIN
@@ -86,7 +86,7 @@
 
 // Should be slightly higher than the desired Vx (e.g. 0.0225 voor 0.02, 0.0440 voor 0.04)
 #ifndef VS_OL_X_VEL_SP
-#define VS_OL_X_VEL_SP -0.0225
+#define VS_OL_X_VEL_SP 0.0
 #endif
 
 #ifndef VS_LP_CONST
@@ -552,9 +552,9 @@ void visual_servoing_module_run(bool in_flight)
       visual_servoing.mu_vx_ff = 0.0f;
     }
 
-    visual_servoing.err_vx = visual_servoing.vel_x_sp - visual_servoing.vel_x;
-    visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * visual_servoing.err_vx;
-    // visual_servoing.mu_x = 0.0;
+    // visual_servoing.err_vx = visual_servoing.vel_x_sp - visual_servoing.vel_x;
+    // visual_servoing.mu_x = visual_servoing.mu_vx_ff + visual_servoing.Kp_vx * visual_servoing.err_vx;
+    visual_servoing.mu_x = 0.0;
     Bound(visual_servoing.mu_x, -0.2f, 0.2f);
   }
 
@@ -581,15 +581,17 @@ void visual_servoing_module_run(bool in_flight)
   visual_servoing.yaw_vel = rates->r;
 
   // Change the ffvx_time threshold to 0.0f when sideways-following moving flowers. This is only for self-centering when approaching
-  float ffvx_time = vs_time - vs_enable_time;
-  if (ffvx_time >= 0.50f){
-    visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
-                         + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel
-                         - visual_servoing.ol_y_OA_gain * visual_servoing.box_centroid_y;
-    }
-  else {
-    visual_servoing.mu_y = 0;
-  }
+  // float ffvx_time = vs_time - vs_enable_time;
+  // if (ffvx_time >= 0.50f){
+  //   visual_servoing.mu_y = - visual_servoing.ol_y_OF_gain * of_y_p_input
+  //                        + visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel
+  //                        - visual_servoing.ol_y_OA_gain * visual_servoing.box_centroid_y;
+  //   }
+  // else {
+  //   visual_servoing.mu_y = 0;
+  // }
+  visual_servoing.mu_y = 0;
+
   
   Bound(visual_servoing.mu_y, -25.0f, 25.0f);
   // float freq = 1.0f;

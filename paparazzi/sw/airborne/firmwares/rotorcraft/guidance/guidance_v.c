@@ -141,6 +141,26 @@ int32_t guidance_v_z_sum_err;
 
 int32_t guidance_v_thrust_coeff;
 
+/*
+ * Vertical guidance diagnostics.
+ */
+int32_t guidance_v_err_z_diag = 0;
+int32_t guidance_v_err_zd_diag = 0;
+
+int32_t guidance_v_p_cmd_diag = 0;
+int32_t guidance_v_d_cmd_diag = 0;
+int32_t guidance_v_i_cmd_diag = 0;
+
+int32_t guidance_v_ff_before_tilt_diag = 0;
+int32_t guidance_v_ff_unbounded_diag = 0;
+
+int32_t guidance_v_delta_t_unbounded_diag = 0;
+
+uint32_t guidance_v_hover_count_diag = 0;
+
+uint8_t guidance_v_ff_saturated_diag = 0;
+uint8_t guidance_v_output_saturated_diag = 0;
+
 
 static int32_t get_vertical_thrust_coeff(void);
 
@@ -185,6 +205,29 @@ void guidance_v_init(void)
   guidance_v_ki = GUIDANCE_V_HOVER_KI;
 
   guidance_v_z_sum_err = 0;
+
+  /*
+  * Reset vertical-guidance diagnostics.
+  *
+  * Do not include type names here: these are assignments
+  * to the file-scope variables defined above.
+  */
+  guidance_v_err_z_diag = 0;
+  guidance_v_err_zd_diag = 0;
+
+  guidance_v_p_cmd_diag = 0;
+  guidance_v_d_cmd_diag = 0;
+  guidance_v_i_cmd_diag = 0;
+
+  guidance_v_ff_before_tilt_diag = 0;
+  guidance_v_ff_unbounded_diag = 0;
+
+  guidance_v_delta_t_unbounded_diag = 0;
+
+  guidance_v_hover_count_diag = 0;
+
+  guidance_v_ff_saturated_diag = 0;
+  guidance_v_output_saturated_diag = 0;
 
   guidance_v_nominal_throttle = GUIDANCE_V_NOMINAL_HOVER_THROTTLE;
   guidance_v_adapt_throttle_enabled = GUIDANCE_V_ADAPT_THROTTLE_ENABLED;
@@ -425,6 +468,11 @@ void run_hover_loop(bool in_flight)
   int32_t err_zd = guidance_v_zd_ref - stateGetSpeedNed_i()->z;
   Bound(err_zd, GUIDANCE_V_MIN_ERR_ZD, GUIDANCE_V_MAX_ERR_ZD);
 
+  guidance_v_hover_count_diag++;
+
+  guidance_v_err_z_diag = err_z;
+  guidance_v_err_zd_diag = err_zd;
+
   if (in_flight) {
     guidance_v_z_sum_err += err_z;
     Bound(guidance_v_z_sum_err, -GUIDANCE_V_MAX_SUM_ERR, GUIDANCE_V_MAX_SUM_ERR);
@@ -444,29 +492,76 @@ void run_hover_loop(bool in_flight)
   const int32_t g_m_zdd = (int32_t)BFP_OF_REAL(9.81, FF_CMD_FRAC) -
                           (guidance_v_zdd_ref << (FF_CMD_FRAC - INT32_ACCEL_FRAC));
 
-  guidance_v_ff_cmd = g_m_zdd / inv_m;
-  /* feed forward command */
-  guidance_v_ff_cmd = (guidance_v_ff_cmd << INT32_TRIG_FRAC) / guidance_v_thrust_coeff;
+  /*
+  * Nominal collective thrust before compensation for roll/pitch.
+  */
+  guidance_v_ff_before_tilt_diag = g_m_zdd / inv_m;
 
-#if HYBRID_NAVIGATION
-  //FIXME: NOT USING FEEDFORWARD COMMAND BECAUSE OF QUADSHOT NAVIGATION
-  guidance_v_ff_cmd = guidance_v_nominal_throttle * MAX_PPRZ;
-#endif
+  /*
+  * Correct collective thrust for the loss of vertical thrust
+  * caused by aircraft tilt.
+  */
+  guidance_v_ff_cmd = (guidance_v_ff_before_tilt_diag << INT32_TRIG_FRAC) / guidance_v_thrust_coeff;
+
+  #if HYBRID_NAVIGATION
+    //FIXME: NOT USING FEEDFORWARD COMMAND BECAUSE OF QUADSHOT NAVIGATION
+    guidance_v_ff_cmd = guidance_v_nominal_throttle * MAX_PPRZ;
+  #endif
+  /*
+  * Preserve feedforward before its maximum-command limit.
+  */
+  guidance_v_ff_unbounded_diag = guidance_v_ff_cmd;
+
+  guidance_v_ff_saturated_diag = (guidance_v_ff_cmd < 0 || guidance_v_ff_cmd > GUIDANCE_V_MAX_CMD) ? 1U : 0U;
 
   /* bound the nominal command to GUIDANCE_V_MAX_CMD */
   Bound(guidance_v_ff_cmd, 0, GUIDANCE_V_MAX_CMD);
 
 
-  /* our error feed back command                   */
-  /* z-axis pointing down -> positive error means we need less thrust */
-  guidance_v_fb_cmd = ((-guidance_v_kp * err_z)  >> 7) +
-                      ((-guidance_v_kd * err_zd) >> 16) +
-                      ((-guidance_v_ki * guidance_v_z_sum_err) >> 16);
+  /*
+  * NED z is positive downward.
+  *
+  * err_z > 0:
+  *   the desired position is farther downward than the aircraft,
+  *   so the aircraft is above the desired altitude and needs
+  *   less thrust.
+  *
+  * err_z < 0:
+  *   the aircraft is below the desired altitude and needs
+  *   more thrust.
+  */
+  guidance_v_p_cmd_diag = (-guidance_v_kp * err_z) >> 7;
 
-  guidance_v_delta_t = guidance_v_ff_cmd + guidance_v_fb_cmd;
+  /*
+  * Exact D contribution from vertical-speed error.
+  */
+  guidance_v_d_cmd_diag = (-guidance_v_kd * err_zd) >> 16;
 
-  /* bound the result */
-  Bound(guidance_v_delta_t, 0, MAX_PPRZ);
+  /*
+  * Exact I contribution from the accumulated position error.
+  */
+  guidance_v_i_cmd_diag = (-guidance_v_ki * guidance_v_z_sum_err) >> 16;
+
+  /*
+  * Preserve the original feedback sum exactly.
+  */
+  guidance_v_fb_cmd = guidance_v_p_cmd_diag + guidance_v_d_cmd_diag + guidance_v_i_cmd_diag;
+
+  guidance_v_delta_t_unbounded_diag = guidance_v_ff_cmd + guidance_v_fb_cmd;
+
+  guidance_v_output_saturated_diag = (
+      guidance_v_delta_t_unbounded_diag < 0 ||
+      guidance_v_delta_t_unbounded_diag > MAX_PPRZ
+    ) ? 1U : 0U;
+
+  guidance_v_delta_t = guidance_v_delta_t_unbounded_diag;
+
+  /* Preserve the original final thrust limit. */
+  Bound(
+    guidance_v_delta_t,
+    0,
+    MAX_PPRZ
+  );
 
 }
 

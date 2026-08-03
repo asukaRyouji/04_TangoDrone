@@ -48,7 +48,7 @@
 // these parameters are used in the filtering of the angular acceleration
 // define them in the airframe file if different values are required
 #ifndef STABILIZATION_INDI_FILT_CUTOFF
-#define STABILIZATION_INDI_FILT_CUTOFF 8.0
+#define STABILIZATION_INDI_FILT_CUTOFF 10.0
 #endif
 
 // the yaw sometimes requires more filtering
@@ -182,6 +182,21 @@ void stabilization_indi_init(void)
   // Initialize filters
   indi_init_filters();
 
+  indi.att_error_fb.x = 0.0f;
+  indi.att_error_fb.y = 0.0f;
+  indi.att_error_fb.z = 0.0f;
+
+  FLOAT_RATES_ZERO(indi.rate_sp);
+  FLOAT_RATES_ZERO(indi.rate_feedback);
+
+  FLOAT_RATES_ZERO(indi.u_in_unbounded);
+
+  indi.rate_run_count = 0;
+
+  indi.saturated_p = 0;
+  indi.saturated_q = 0;
+  indi.saturated_r = 0;
+
 #if PERIODIC_TELEMETRY
   register_periodic_telemetry(DefaultPeriodic, PPRZ_MSG_ID_STAB_ATTITUDE_INDI, send_att_indi);
   register_periodic_telemetry(DefaultPeriodic, PPRZ_MSG_ID_AHRS_REF_QUAT, send_ahrs_ref_quat);
@@ -228,6 +243,20 @@ void stabilization_indi_enter(void)
   FLOAT_RATES_ZERO(indi.angular_accel_ref);
   FLOAT_RATES_ZERO(indi.u_act_dyn);
   FLOAT_RATES_ZERO(indi.u_in);
+
+  indi.att_error_fb.x = 0.0f;
+  indi.att_error_fb.y = 0.0f;
+  indi.att_error_fb.z = 0.0f;
+
+  FLOAT_RATES_ZERO(indi.rate_sp);
+  FLOAT_RATES_ZERO(indi.rate_feedback);
+  FLOAT_RATES_ZERO(indi.u_in_unbounded);
+
+  indi.rate_run_count = 0;
+
+  indi.saturated_p = 0;
+  indi.saturated_q = 0;
+  indi.saturated_r = 0;
 
   // Re-initialize filters
   indi_init_filters();
@@ -362,8 +391,20 @@ void stabilization_indi_rate_run(struct FloatRates rate_sp, bool in_flight __att
   rates_filt.r = body_rates->r;
 #endif
 
+  /*
+  * Preserve the exact rate signal used by the rate feedback
+  * controller. It may differ from raw body_p/q/r.
+  */
+  indi.rate_feedback = rates_filt;
+
+  indi.rate_run_count++;
+
   //This lets you impose a maximum yaw rate.
   BoundAbs(rate_sp.r, indi.attitude_max_yaw_rate);
+  /*
+  * Preserve the actual rate setpoint after the yaw-rate limit.
+  */
+  indi.rate_sp = rate_sp;
 
   // Compute reference angular acceleration:
   indi.angular_accel_ref.p = (rate_sp.p - rates_filt.p) * indi.gains.rate.p;
@@ -396,6 +437,10 @@ void stabilization_indi_rate_run(struct FloatRates rate_sp, bool in_flight __att
     // only run the estimation if the commands are not zero.
     lms_estimation();
   }
+  /*
+  * Save total INDI input before command saturation.
+  */
+  indi.u_in_unbounded = indi.u_in;
 
   //bound the total control input
 #if STABILIZATION_INDI_FULL_AUTHORITY
@@ -409,6 +454,18 @@ void stabilization_indi_rate_run(struct FloatRates rate_sp, bool in_flight __att
   Bound(indi.u_in.q, -4500, 4500);
   Bound(indi.u_in.r, -4500, 4500);
 #endif
+
+  /*
+  * Detect whether an INDI axis was limited.
+  *
+  * A small tolerance avoids classifying float round-off as
+  * saturation.
+  */
+  indi.saturated_p = (fabsf(indi.u_in.p - indi.u_in_unbounded.p) > 0.5f) ? 1U : 0U;
+
+  indi.saturated_q = (fabsf(indi.u_in.q - indi.u_in_unbounded.q) > 0.5f) ? 1U : 0U;
+
+  indi.saturated_r = (fabsf(indi.u_in.r - indi.u_in_unbounded.r) > 0.5f) ? 1U : 0U;
 
   /*  INDI feedback */
   stabilization_cmd[COMMAND_ROLL] = indi.u_in.p;
@@ -451,6 +508,12 @@ void stabilization_indi_attitude_run(struct Int32Quat quat_sp, bool in_flight __
   att_fb.y = att_err.qy;
   att_fb.z = att_err.qz;
 #endif
+
+  /*
+  * Preserve the exact attitude feedback used to create
+  * the rate setpoint.
+  */
+  indi.att_error_fb = att_fb;
 
   struct FloatRates rate_sp;
   // Divide by rate gain to make it equivalent to a parallel structure

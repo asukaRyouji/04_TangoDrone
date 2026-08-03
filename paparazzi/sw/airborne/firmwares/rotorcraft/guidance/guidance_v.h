@@ -78,6 +78,38 @@ extern int32_t guidance_v_z_sum_err; ///< accumulator for I-gain
 extern int32_t guidance_v_ff_cmd;    ///< feed-forward command
 extern int32_t guidance_v_fb_cmd;    ///< feed-back command
 
+/*
+ * Exact bounded errors used by run_hover_loop().
+ */
+extern int32_t guidance_v_err_z_diag;
+extern int32_t guidance_v_err_zd_diag;
+
+/*
+ * Exact P, D and I feedback contributions.
+ */
+extern int32_t guidance_v_p_cmd_diag;
+extern int32_t guidance_v_d_cmd_diag;
+extern int32_t guidance_v_i_cmd_diag;
+
+/*
+ * Feedforward stages.
+ */
+extern int32_t guidance_v_ff_before_tilt_diag;
+extern int32_t guidance_v_ff_unbounded_diag;
+
+/*
+ * Final thrust command before output saturation.
+ */
+extern int32_t guidance_v_delta_t_unbounded_diag;
+
+/*
+ * Execution and saturation diagnostics.
+ */
+extern uint32_t guidance_v_hover_count_diag;
+
+extern uint8_t guidance_v_ff_saturated_diag;
+extern uint8_t guidance_v_output_saturated_diag;
+
 /** Direct throttle from radio control.
  *  range 0:#MAX_PPRZ
  */

@@ -104,6 +104,45 @@ struct Int32Vect2 guidance_h_trim_att_integrator;
  */
 struct Int32Vect2  guidance_h_cmd_earth;
 
+/*
+ * Horizontal PID diagnostic terms.
+ */
+struct Int32Vect2 guidance_h_p_cmd_diag;
+struct Int32Vect2 guidance_h_d_cmd_diag;
+struct Int32Vect2 guidance_h_v_ff_cmd_diag;
+struct Int32Vect2 guidance_h_a_ff_cmd_diag;
+
+/*
+ * Command before the first bank-angle saturation.
+ */
+struct Int32Vect2 guidance_h_cmd_pre_sat_diag;
+
+/*
+ * Effective integral contribution after converting the
+ * high-resolution integrator to INT32_ANGLE_FRAC.
+ */
+struct Int32Vect2 guidance_h_i_cmd_diag;
+
+/*
+ * Command after adding the I contribution, but before the
+ * optional thrust-based force conversion.
+ */
+struct Int32Vect2 guidance_h_cmd_after_i_diag;
+
+/*
+ * Number of times guidance_h_traj_run() has executed.
+ */
+uint32_t guidance_h_traj_count_diag = 0;
+
+/*
+ * Per-axis saturation flags.
+ */
+uint8_t guidance_h_traj_sat_x_diag = 0;
+uint8_t guidance_h_traj_sat_y_diag = 0;
+
+uint8_t guidance_h_final_sat_x_diag = 0;
+uint8_t guidance_h_final_sat_y_diag = 0;
+
 static void guidance_h_update_reference(void);
 #if !GUIDANCE_INDI
 static void guidance_h_traj_run(bool in_flight);
@@ -182,6 +221,26 @@ void guidance_h_init(void)
 
   INT_VECT2_ZERO(guidance_h.sp.pos);
   INT_VECT2_ZERO(guidance_h_trim_att_integrator);
+  INT_VECT2_ZERO(guidance_h_pos_err);
+  INT_VECT2_ZERO(guidance_h_speed_err);
+  INT_VECT2_ZERO(guidance_h_cmd_earth);
+
+  INT_VECT2_ZERO(guidance_h_p_cmd_diag);
+  INT_VECT2_ZERO(guidance_h_d_cmd_diag);
+  INT_VECT2_ZERO(guidance_h_v_ff_cmd_diag);
+  INT_VECT2_ZERO(guidance_h_a_ff_cmd_diag);
+
+  INT_VECT2_ZERO(guidance_h_cmd_pre_sat_diag);
+  INT_VECT2_ZERO(guidance_h_i_cmd_diag);
+  INT_VECT2_ZERO(guidance_h_cmd_after_i_diag);
+
+  guidance_h_traj_count_diag = 0;
+
+  guidance_h_traj_sat_x_diag = 0;
+  guidance_h_traj_sat_y_diag = 0;
+
+  guidance_h_final_sat_x_diag = 0;
+  guidance_h_final_sat_y_diag = 0;
   FLOAT_EULERS_ZERO(guidance_h.rc_sp);
   guidance_h.sp.heading = 0.0;
   guidance_h.sp.heading_rate = 0.0;
@@ -500,42 +559,147 @@ static void guidance_h_traj_run(bool in_flight)
   /* saturate it               */
   VECT2_STRIM(guidance_h_speed_err, -MAX_SPEED_ERR, MAX_SPEED_ERR);
 
-  /* run PID */
-  int32_t pd_x =
-    ((guidance_h.gains.p * guidance_h_pos_err.x) >> (INT32_POS_FRAC - GH_GAIN_SCALE)) +
-    ((guidance_h.gains.d * (guidance_h_speed_err.x >> 2)) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE - 2));
-  int32_t pd_y =
-    ((guidance_h.gains.p * guidance_h_pos_err.y) >> (INT32_POS_FRAC - GH_GAIN_SCALE)) +
-    ((guidance_h.gains.d * (guidance_h_speed_err.y >> 2)) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE - 2));
-  guidance_h_cmd_earth.x = pd_x +
-                           ((guidance_h.gains.v * guidance_h.ref.speed.x) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE)) + /* speed feedforward gain */
-                           ((guidance_h.gains.a * guidance_h.ref.accel.x) >> (INT32_ACCEL_FRAC -
-                               GH_GAIN_SCALE));   /* acceleration feedforward gain */
-  guidance_h_cmd_earth.y = pd_y +
-                           ((guidance_h.gains.v * guidance_h.ref.speed.y) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE)) + /* speed feedforward gain */
-                           ((guidance_h.gains.a * guidance_h.ref.accel.y) >> (INT32_ACCEL_FRAC -
-                               GH_GAIN_SCALE));   /* acceleration feedforward gain */
+  /*
+  * Count each actual execution of the standard horizontal
+  * trajectory controller.
+  */
+  guidance_h_traj_count_diag++;
 
-  /* trim max bank angle from PD */
+  /*
+  * Calculate the individual P contributions using exactly
+  * the same fixed-point scaling as the original controller.
+  */
+  guidance_h_p_cmd_diag.x = (guidance_h.gains.p * guidance_h_pos_err.x) >> (INT32_POS_FRAC - GH_GAIN_SCALE);
+
+  guidance_h_p_cmd_diag.y = (guidance_h.gains.p * guidance_h_pos_err.y) >> (INT32_POS_FRAC - GH_GAIN_SCALE);
+
+  /*
+  * Calculate the individual D contributions.
+  *
+  * The original implementation first shifts speed error by two
+  * bits and compensates for that in the final shift. Preserve
+  * that exact order.
+  */
+  guidance_h_d_cmd_diag.x = (guidance_h.gains.d * (guidance_h_speed_err.x >> 2)) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE - 2);
+
+  guidance_h_d_cmd_diag.y = (guidance_h.gains.d * (guidance_h_speed_err.y >> 2)) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE - 2);
+
+  /*
+  * Velocity-feedforward contribution.
+  */
+  guidance_h_v_ff_cmd_diag.x = (guidance_h.gains.v * guidance_h.ref.speed.x) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE);
+
+  guidance_h_v_ff_cmd_diag.y = (guidance_h.gains.v * guidance_h.ref.speed.y) >> (INT32_SPEED_FRAC - GH_GAIN_SCALE);
+
+  /*
+  * Acceleration-feedforward contribution.
+  */
+  guidance_h_a_ff_cmd_diag.x = (guidance_h.gains.a * guidance_h.ref.accel.x) >> (INT32_ACCEL_FRAC - GH_GAIN_SCALE);
+
+  guidance_h_a_ff_cmd_diag.y = (guidance_h.gains.a * guidance_h.ref.accel.y) >> (INT32_ACCEL_FRAC - GH_GAIN_SCALE);
+
+  /*
+  * This is the complete command before the first
+  * trajectory bank-angle saturation.
+  */
+  guidance_h_cmd_pre_sat_diag.x = guidance_h_p_cmd_diag.x + guidance_h_d_cmd_diag.x + guidance_h_v_ff_cmd_diag.x + guidance_h_a_ff_cmd_diag.x;
+
+  guidance_h_cmd_pre_sat_diag.y = guidance_h_p_cmd_diag.y + guidance_h_d_cmd_diag.y + guidance_h_v_ff_cmd_diag.y + guidance_h_a_ff_cmd_diag.y;
+
+  /*
+  * Detect whether the trajectory command would be saturated
+  * before applying the first bank-angle limit.
+  */
+  guidance_h_traj_sat_x_diag =
+    (
+      guidance_h_cmd_pre_sat_diag.x > traj_max_bank ||
+      guidance_h_cmd_pre_sat_diag.x < -traj_max_bank
+    ) ? 1U : 0U;
+
+  guidance_h_traj_sat_y_diag =
+    (
+      guidance_h_cmd_pre_sat_diag.y > traj_max_bank ||
+      guidance_h_cmd_pre_sat_diag.y < -traj_max_bank
+    ) ? 1U : 0U;
+
+  /*
+  * Copy the unsaturated diagnostic command into the real
+  * controller command.
+  */
+  VECT2_COPY(
+    guidance_h_cmd_earth,
+    guidance_h_cmd_pre_sat_diag
+  );
+
+  /*
+  * Apply the original first bank-angle limit exactly once.
+  */
   VECT2_STRIM(guidance_h_cmd_earth, -traj_max_bank, traj_max_bank);
+  
 
   /* Update pos & speed error integral, zero it if not in_flight.
    * Integrate twice as fast when not only POS but also SPEED are wrong,
    * but do not integrate POS errors when the SPEED is already catching up.
    */
+
+   const int32_t pd_x =
+      guidance_h_p_cmd_diag.x +
+      guidance_h_d_cmd_diag.x;
+
+    const int32_t pd_y =
+      guidance_h_p_cmd_diag.y +
+      guidance_h_d_cmd_diag.y;
+
   if (in_flight) {
-    /* ANGLE_FRAC (12) * GAIN (8) * LOOP_FREQ (9) -> INTEGRATOR HIGH RES ANGLE_FRAX (28) */
-    guidance_h_trim_att_integrator.x += (guidance_h.gains.i * pd_x);
-    guidance_h_trim_att_integrator.y += (guidance_h.gains.i * pd_y);
-    /* saturate it  */
-    VECT2_STRIM(guidance_h_trim_att_integrator, -(traj_max_bank << (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2)),
-                (traj_max_bank << (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2)));
-    /* add it to the command */
-    guidance_h_cmd_earth.x += (guidance_h_trim_att_integrator.x >> (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2));
-    guidance_h_cmd_earth.y += (guidance_h_trim_att_integrator.y >> (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2));
-  } else {
-    INT_VECT2_ZERO(guidance_h_trim_att_integrator);
-  }
+
+      /*
+      * Preserve the original integrator update:
+      * integral input is P + D, not position error alone.
+      */
+      guidance_h_trim_att_integrator.x += guidance_h.gains.i * pd_x;
+
+      guidance_h_trim_att_integrator.y += guidance_h.gains.i * pd_y;
+
+      /*
+      * Preserve the original high-resolution integrator limits.
+      */
+      VECT2_STRIM(
+        guidance_h_trim_att_integrator,
+        -(traj_max_bank << (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2)),
+        (traj_max_bank << (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2))
+      );
+
+      /*
+      * Convert the high-resolution integrator into the actual
+      * angle contribution added to the controller command.
+      */
+      guidance_h_i_cmd_diag.x = guidance_h_trim_att_integrator.x >> (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2);
+
+      guidance_h_i_cmd_diag.y = guidance_h_trim_att_integrator.y >> (INT32_ANGLE_FRAC + GH_GAIN_SCALE * 2);
+
+      guidance_h_cmd_earth.x += guidance_h_i_cmd_diag.x;
+
+      guidance_h_cmd_earth.y += guidance_h_i_cmd_diag.y;
+
+    } else {
+
+      INT_VECT2_ZERO(
+        guidance_h_trim_att_integrator
+      );
+
+      INT_VECT2_ZERO(
+        guidance_h_i_cmd_diag
+      );
+    }
+
+    /*
+    * Save the command after integral trim but before the optional
+    * thrust-based force conversion.
+    */
+    VECT2_COPY(
+      guidance_h_cmd_after_i_diag,
+      guidance_h_cmd_earth
+);
 
   /* compute a better approximation of force commands by taking thrust into account */
   if (guidance_h.approx_force_by_thrust && in_flight) {
@@ -548,6 +712,18 @@ static void guidance_h_traj_run(bool in_flight)
     guidance_h_cmd_earth.y = ANGLE_BFP_OF_REAL(atan2f((guidance_h_cmd_earth.y * MAX_PPRZ / INT32_ANGLE_PI_2),
                              thrust_cmd_filt));
   }
+
+  guidance_h_final_sat_x_diag =
+    (
+      guidance_h_cmd_earth.x > total_max_bank ||
+      guidance_h_cmd_earth.x < -total_max_bank
+    ) ? 1U : 0U;
+
+  guidance_h_final_sat_y_diag =
+    (
+      guidance_h_cmd_earth.y > total_max_bank ||
+      guidance_h_cmd_earth.y < -total_max_bank
+    ) ? 1U : 0U;
 
   VECT2_STRIM(guidance_h_cmd_earth, -total_max_bank, total_max_bank);
 }

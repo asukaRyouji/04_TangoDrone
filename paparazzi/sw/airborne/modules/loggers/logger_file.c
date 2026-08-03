@@ -42,6 +42,9 @@
 
 #ifdef COMMAND_THRUST
 #include "firmwares/rotorcraft/stabilization.h"
+#include "firmwares/rotorcraft/guidance/guidance_v.h"
+#include "firmwares/rotorcraft/guidance/guidance_h.h"
+#include "firmwares/rotorcraft/stabilization/stabilization_indi_simple.h"
 #else
 #include "firmwares/fixedwing/stabilization/stabilization_attitude.h"
 #include "firmwares/fixedwing/stabilization/stabilization_adaptive.h"
@@ -56,6 +59,16 @@
 
 /** The file pointer */
 static FILE *logger_file = NULL;
+
+/*
+ * Logger timing and buffered-write diagnostics.
+ */
+static uint16_t logger_flush_counter = 0;
+
+static uint32_t logger_last_write_usec = 0;
+static uint32_t logger_max_write_usec = 0;
+
+static char logger_file_buffer[64 * 1024];
 
 
 /** Logging functions */
@@ -72,20 +85,123 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "vel_x,vel_y,vel_z,");
   fprintf(file, "acc_x,acc_y,acc_z,");
   fprintf(file, "att_phi,att_theta,att_psi,");
-  fprintf(file, "distance_est,centroid_x,centroid_y,");
-  fprintf(file, "height_e,");
-  fprintf(file, "divergence,true_divergence,divergence_sp,set_point,");
-  fprintf(file, "dt,raw_divergence,color_count,");
-  fprintf(file, "raw_of_y, of_y, raw_of_y_d, of_y_d, yaw_vel,");
-  fprintf(file, "mu_x, mu_y, mu_z,");
+  // fprintf(file, "distance_est,centroid_x,centroid_y,");
+  // fprintf(file, "dt, color_count,");
+  // fprintf(file, "raw_of_y, of_y, raw_of_y_d, of_y_d, yaw_vel,");
+  // fprintf(file, "mu_x, mu_y, mu_z,");
+
+  #ifdef INS_EXT_POSE_H
+    fprintf(
+      file,
+      "ext_rx_count,"
+      "ext_last_rx_usec,"
+      "ext_dt_usec,"
+      "ext_age_usec,"
+      "ext_new_sample,"
+    );
+  #endif
+
+  #ifdef COMMAND_THRUST
+    /*
+    * Vertical-guidance diagnostics.
+    */
+    fprintf(file, "guidance_v_mode,");
+    fprintf(file, "z_sp,z_ref,z_error,");
+    fprintf(file, "vz_sp,vz_ref,vz_error,");
+    fprintf(file, "az_ref,");
+    fprintf(file, "z_sum_error,");
+    fprintf(file, "guidance_kp,guidance_kd,guidance_ki,");
+    fprintf(file, "guidance_ff_cmd,guidance_fb_cmd,guidance_delta_t,");
+    fprintf(file,
+      "gv_hover_count,"
+      "gv_err_z_used,"
+      "gv_err_zd_used,"
+      "gv_p_cmd,"
+      "gv_d_cmd,"
+      "gv_i_cmd,"
+      "gv_ff_before_tilt,"
+      "gv_ff_unbounded,"
+      "gv_ff_saturated,"
+      "gv_delta_unbounded,"
+      "gv_output_saturated,"
+      "gv_thrust_coeff,"
+      "gv_nominal_throttle,"
+      "gv_adapt_enabled,"
+    );
+
+    fprintf(file,
+      "gh_traj_count,"
+      "gh_mode,"
+      "gh_use_ref,"
+      "gh_approx_force,"
+      "gh_sp_mask,"
+    );
+
+    fprintf(
+      file,
+      "gh_sp_x,gh_sp_y,"
+      "gh_sp_vx,gh_sp_vy,"
+      "gh_heading_sp,"
+    );
+
+    fprintf(
+      file,
+      "gh_ref_x,gh_ref_y,"
+      "gh_ref_vx,gh_ref_vy,"
+      "gh_ref_ax,gh_ref_ay,"
+    );
+
+    fprintf(
+      file,
+      "gh_pos_err_x,gh_pos_err_y,"
+      "gh_speed_err_x,gh_speed_err_y,"
+    );
+
+    fprintf(
+      file,
+      "gh_p_n,gh_p_e,"
+      "gh_d_n,gh_d_e,"
+      "gh_vff_n,gh_vff_e,"
+      "gh_aff_n,gh_aff_e,"
+    );
+
+    fprintf(
+      file,
+      "gh_cmd_pre_sat_n,"
+      "gh_cmd_pre_sat_e,"
+      "gh_i_n,gh_i_e,"
+      "gh_i_raw_n,gh_i_raw_e,"
+      "gh_cmd_after_i_n,"
+      "gh_cmd_after_i_e,"
+      "gh_cmd_final_n,"
+      "gh_cmd_final_e,"
+    );
+
+    fprintf(
+      file,
+      "gh_traj_sat_n,"
+      "gh_traj_sat_e,"
+      "gh_final_sat_n,"
+      "gh_final_sat_e,"
+    );
+
+    fprintf(
+      file,
+      "att_sp_phi,"
+      "att_sp_theta,"
+      "att_sp_psi,"
+    );
+  #endif
+
+  fprintf(file, "body_p,body_q,body_r,");
 
   /*
    * Moving setup / flower setup received from OptiTrack id_num 666.
    */
-  fprintf(file, "setup_valid,");
-  fprintf(file, "setup_target_id,setup_target_timestamp,setup_age_ms,");
-  fprintf(file, "setup_enu_x,setup_enu_y,setup_enu_z,");
-  fprintf(file, "setup_enu_xd,setup_enu_yd,setup_enu_zd,");
+  // fprintf(file, "setup_valid,");
+  // fprintf(file, "setup_target_id,setup_target_timestamp,setup_age_ms,");
+  // fprintf(file, "setup_enu_x,setup_enu_y,setup_enu_z,");
+  // fprintf(file, "setup_enu_xd,setup_enu_yd,setup_enu_zd,");
 
 #ifdef BOARD_BEBOP
   fprintf(file, "rpm_obs_1,rpm_obs_2,rpm_obs_3,rpm_obs_4,");
@@ -94,7 +210,107 @@ static void logger_file_write_header(FILE *file) {
 #ifdef INS_EXT_POSE_H
   ins_ext_pos_log_header(file);
 #endif
+
+  fprintf(
+    file,
+    "logger_write_usec,"
+    "logger_max_write_usec,"
+  );
+
 #ifdef COMMAND_THRUST
+  fprintf(
+    file,
+    "indi_rate_run_count,"
+    "indi_att_fb_x,"
+    "indi_att_fb_y,"
+    "indi_att_fb_z,"
+  );
+
+  fprintf(
+    file,
+    "indi_rate_sp_p,"
+    "indi_rate_sp_q,"
+    "indi_rate_sp_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_rate_fb_p,"
+    "indi_rate_fb_q,"
+    "indi_rate_fb_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_rate_filt_p,"
+    "indi_rate_filt_q,"
+    "indi_rate_filt_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_rate_d_p,"
+    "indi_rate_d_q,"
+    "indi_rate_d_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_acc_ref_p,"
+    "indi_acc_ref_q,"
+    "indi_acc_ref_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_u_act_p,"
+    "indi_u_act_q,"
+    "indi_u_act_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_u_filt_p,"
+    "indi_u_filt_q,"
+    "indi_u_filt_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_du_p,"
+    "indi_du_q,"
+    "indi_du_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_u_unbounded_p,"
+    "indi_u_unbounded_q,"
+    "indi_u_unbounded_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_u_in_p,"
+    "indi_u_in_q,"
+    "indi_u_in_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_sat_p,"
+    "indi_sat_q,"
+    "indi_sat_r,"
+  );
+
+  fprintf(
+    file,
+    "indi_g1_p,"
+    "indi_g1_q,"
+    "indi_g1_r,"
+    "indi_g2,"
+  );
+
   fprintf(file, "cmd_thrust,cmd_roll,cmd_pitch,cmd_yaw\n");
 #else
   fprintf(file, "h_ctl_aileron_setpoint,h_ctl_elevator_setpoint\n");
@@ -113,41 +329,422 @@ static void logger_file_write_row(FILE *file) {
   struct NedCoor_f *acc = stateGetAccelNed_f();
   struct FloatEulers *att = stateGetNedToBodyEulers_f();
 
+  struct FloatRates *body_rates = stateGetBodyRates_f();
+
   fprintf(file, "%f,", get_sys_time_float());
   fprintf(file, "%f,%f,%f,", pos->x, pos->y, pos->z);
   fprintf(file, "%f,%f,%f,", vel->x, vel->y, vel->z);
   fprintf(file, "%f,%f,%f,", acc->x, acc->y, acc->z);
   fprintf(file, "%f,%f,%f,", att->phi, att->theta, att->psi);
-  fprintf(file, "%f,%f,%f,", visual_servoing.distance_est, visual_servoing.box_centroid_x, visual_servoing.box_centroid_y);
-  fprintf(file, "%f,", visual_servoing.height_error);
-  fprintf(file, "%f,%f,%f,%f,", visual_servoing.divergence, visual_servoing.true_divergence, visual_servoing.divergence_sp, visual_servoing.set_point);
-  fprintf(file, "%f,%f,%f,", visual_servoing.dt, visual_servoing.raw_divergence, visual_servoing.color_count);
-  fprintf(file, "%f,%f,%f,%f,%f,", visual_servoing.raw_of_y, visual_servoing.of_y, visual_servoing.raw_of_y_d, visual_servoing.of_y_d, visual_servoing.yaw_vel);
-  fprintf(file, "%f,%f,%f,", visual_servoing.mu_x, visual_servoing.mu_y, visual_servoing.mu_z);
+  // fprintf(file, "%f,%f,%f,", visual_servoing.distance_est, visual_servoing.box_centroid_x, visual_servoing.box_centroid_y);
+  // fprintf(file, "%f,%f,", visual_servoing.dt, visual_servoing.color_count);
+  // fprintf(file, "%f,%f,%f,%f,%f,", visual_servoing.raw_of_y, visual_servoing.of_y, visual_servoing.raw_of_y_d, visual_servoing.of_y_d, visual_servoing.yaw_vel);
+  // fprintf(file, "%f,%f,%f,", visual_servoing.mu_x, visual_servoing.mu_y, visual_servoing.mu_z);
+  #ifdef INS_EXT_POSE_H
     /*
+    * Determine the age of the most recently received EXTERNAL_POSE message.
+    */
+    const uint32_t logger_now_usec = get_sys_time_usec();
+
+    const uint32_t ext_age_usec =
+        (ins_ext_pose_rx_count > 0)
+        ? (logger_now_usec - ins_ext_pose_last_rx_usec)
+        : 0;
+
+    /*
+    * The logger may run faster than EXTERNAL_POSE.
+    * ext_new_sample becomes 1 only when the receive counter changes.
+    */
+    static uint32_t previous_ext_rx_count = 0;
+
+    const uint8_t ext_new_sample =
+        (ins_ext_pose_rx_count != previous_ext_rx_count) ? 1 : 0;
+
+    previous_ext_rx_count = ins_ext_pose_rx_count;
+
+      fprintf(
+        file,
+        "%u,%u,%u,%u,%u,",
+
+        (unsigned int)ins_ext_pose_rx_count,
+        (unsigned int)ins_ext_pose_last_rx_usec,
+        (unsigned int)ins_ext_pose_dt_usec,
+        (unsigned int)ext_age_usec,
+        (unsigned int)ext_new_sample
+      );
+  #endif
+
+  #ifdef COMMAND_THRUST
+    /*
+    * Integer-state values are converted to physical SI units.
+    *
+    * z:       Q23.8
+    * vz:      Q12.19
+    * az:      Q21.10
+    */
+    const float z_sp_m =
+        POS_FLOAT_OF_BFP(guidance_v_z_sp);
+
+    const float z_ref_m =
+        POS_FLOAT_OF_BFP(guidance_v_z_ref);
+
+    const float vz_sp_mps =
+        SPEED_FLOAT_OF_BFP(guidance_v_zd_sp);
+
+    const float vz_ref_mps =
+        SPEED_FLOAT_OF_BFP(guidance_v_zd_ref);
+
+    const float az_ref_mps2 =
+        ACCEL_FLOAT_OF_BFP(guidance_v_zdd_ref);
+
+    /*
+    * pos->z and vel->z were obtained at the top of this function.
+    */
+    const float z_error_m = z_ref_m - pos->z;
+    const float vz_error_mps = vz_ref_mps - vel->z;
+
+    fprintf(file, "%u,", guidance_v_mode);
+
+    fprintf(file, "%f,%f,%f,",
+            z_sp_m,
+            z_ref_m,
+            z_error_m);
+
+    fprintf(file, "%f,%f,%f,",
+            vz_sp_mps,
+            vz_ref_mps,
+            vz_error_mps);
+
+    fprintf(file, "%f,", az_ref_mps2);
+
+    /*
+    * Keep the integral accumulator in its native representation.
+    * It is mainly useful for checking wind-up and slow oscillations.
+    */
+    fprintf(file, "%d,", guidance_v_z_sum_err);
+
+    fprintf(file, "%d,%d,%d,",
+            guidance_v_kp,
+            guidance_v_kd,
+            guidance_v_ki);
+
+    fprintf(file, "%d,%d,%d,",
+            guidance_v_ff_cmd,
+            guidance_v_fb_cmd,
+            guidance_v_delta_t);
+
+    /*
+    * Convert thrust coefficient from INT32_TRIG_FRAC to a
+    * dimensionless floating-point value.
+    */
+    const float gv_thrust_coeff_f =
+      (float)guidance_v_thrust_coeff /
+      (float)(1 << INT32_TRIG_FRAC);
+
+    fprintf(file,
+      "%u,"
+      "%f,%f,"
+      "%d,%d,%d,"
+      "%d,%d,"
+      "%u,"
+      "%d,"
+      "%u,"
+      "%f,%f,%u,",
+
+      (unsigned int)guidance_v_hover_count_diag,
+
+      POS_FLOAT_OF_BFP(
+        guidance_v_err_z_diag
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_v_err_zd_diag
+      ),
+
+      guidance_v_p_cmd_diag,
+      guidance_v_d_cmd_diag,
+      guidance_v_i_cmd_diag,
+
+      guidance_v_ff_before_tilt_diag,
+      guidance_v_ff_unbounded_diag,
+
+      (unsigned int)
+        guidance_v_ff_saturated_diag,
+
+      guidance_v_delta_t_unbounded_diag,
+
+      (unsigned int)
+        guidance_v_output_saturated_diag,
+
+      gv_thrust_coeff_f,
+      guidance_v_nominal_throttle,
+
+      guidance_v_adapt_throttle_enabled
+        ? 1U
+        : 0U
+    );
+
+    fprintf(
+      file,
+      "%u,%u,%u,%u,%u,",
+
+      (unsigned int)
+        guidance_h_traj_count_diag,
+
+      (unsigned int)
+        guidance_h.mode,
+
+      guidance_h.use_ref
+        ? 1U
+        : 0U,
+
+      guidance_h.approx_force_by_thrust
+        ? 1U
+        : 0U,
+
+      (unsigned int)
+        guidance_h.sp.mask
+    );
+
+    /*
+    * Setpoint.
+    */
+    fprintf(
+      file,
+      "%f,%f,%f,%f,%f,",
+
+      POS_FLOAT_OF_BFP(
+        guidance_h.sp.pos.x
+      ),
+
+      POS_FLOAT_OF_BFP(
+        guidance_h.sp.pos.y
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h.sp.speed.x
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h.sp.speed.y
+      ),
+
+      guidance_h.sp.heading
+    );
+
+    /*
+    * Reference generated from the setpoint.
+    */
+    fprintf(
+      file,
+      "%f,%f,%f,%f,%f,%f,",
+
+      POS_FLOAT_OF_BFP(
+        guidance_h.ref.pos.x
+      ),
+
+      POS_FLOAT_OF_BFP(
+        guidance_h.ref.pos.y
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h.ref.speed.x
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h.ref.speed.y
+      ),
+
+      ACCEL_FLOAT_OF_BFP(
+        guidance_h.ref.accel.x
+      ),
+
+      ACCEL_FLOAT_OF_BFP(
+        guidance_h.ref.accel.y
+      )
+    );
+
+    /*
+    * Actual bounded errors used by horizontal guidance.
+    */
+    fprintf(
+      file,
+      "%f,%f,%f,%f,",
+
+      POS_FLOAT_OF_BFP(
+        guidance_h_pos_err.x
+      ),
+
+      POS_FLOAT_OF_BFP(
+        guidance_h_pos_err.y
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h_speed_err.x
+      ),
+
+      SPEED_FLOAT_OF_BFP(
+        guidance_h_speed_err.y
+      )
+    );
+
+    /*
+    * Individual P, D, velocity-feedforward and
+    * acceleration-feedforward angle contributions.
+    */
+    fprintf(
+      file,
+      "%f,%f,"
+      "%f,%f,"
+      "%f,%f,"
+      "%f,%f,",
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_p_cmd_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_p_cmd_diag.y
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_d_cmd_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_d_cmd_diag.y
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_v_ff_cmd_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_v_ff_cmd_diag.y
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_a_ff_cmd_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_a_ff_cmd_diag.y
+      )
+    );
+
+    /*
+    * Commands at each stage of horizontal guidance.
+    */
+    fprintf(
+      file,
+      "%f,%f,"
+      "%f,%f,"
+      "%d,%d,"
+      "%f,%f,"
+      "%f,%f,",
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_pre_sat_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_pre_sat_diag.y
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_i_cmd_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_i_cmd_diag.y
+      ),
+
+      guidance_h_trim_att_integrator.x,
+      guidance_h_trim_att_integrator.y,
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_after_i_diag.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_after_i_diag.y
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_earth.x
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        guidance_h_cmd_earth.y
+      )
+    );
+
+    fprintf(
+      file,
+      "%u,%u,%u,%u,",
+
+      (unsigned int)
+        guidance_h_traj_sat_x_diag,
+
+      (unsigned int)
+        guidance_h_traj_sat_y_diag,
+
+      (unsigned int)
+        guidance_h_final_sat_x_diag,
+
+      (unsigned int)
+        guidance_h_final_sat_y_diag
+    );
+
+    /*
+    * Body-frame roll, pitch and yaw setpoint produced from the
+    * final NED horizontal command and heading.
+    */
+    fprintf(
+      file,
+      "%f,%f,%f,",
+
+      ANGLE_FLOAT_OF_BFP(
+        stab_att_sp_euler.phi
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        stab_att_sp_euler.theta
+      ),
+
+      ANGLE_FLOAT_OF_BFP(
+        stab_att_sp_euler.psi
+      )
+    );
+  #endif
+
+  fprintf(file, "%f,%f,%f,", body_rates->p, body_rates->q, body_rates->r);
+
+  /*
    * Moving setup / flower setup data.
    * This is the latest MOVING_SETUP_POS received onboard by the Bebop.
    */
-  uint32_t now_ms = get_sys_time_msec();
-  uint32_t setup_age_ms = moving_setup.valid ? (now_ms - moving_setup.last_rx_time) : 0;
-  uint8_t setup_valid = moving_setup.valid ? 1 : 0;
+  // uint32_t now_ms = get_sys_time_msec();
+  // uint32_t setup_age_ms = moving_setup.valid ? (now_ms - moving_setup.last_rx_time) : 0;
+  // uint8_t setup_valid = moving_setup.valid ? 1 : 0;
 
-  fprintf(file, "%u,", setup_valid);
+  // fprintf(file, "%u,", setup_valid);
 
-  fprintf(file, "%u,%u,%u,",
-          moving_setup.target_id,
-          moving_setup.target_timestamp,
-          setup_age_ms);
+  // fprintf(file, "%u,%u,%u,",
+  //         moving_setup.target_id,
+  //         moving_setup.target_timestamp,
+  //         setup_age_ms);
 
-  fprintf(file, "%f,%f,%f,",
-          moving_setup.enu_x,
-          moving_setup.enu_y,
-          moving_setup.enu_z);
+  // fprintf(file, "%f,%f,%f,",
+  //         moving_setup.enu_x,
+  //         moving_setup.enu_y,
+  //         moving_setup.enu_z);
 
-  fprintf(file, "%f,%f,%f,",
-          moving_setup.enu_xd,
-          moving_setup.enu_yd,
-          moving_setup.enu_zd);
+  // fprintf(file, "%f,%f,%f,",
+  //         moving_setup.enu_xd,
+  //         moving_setup.enu_yd,
+  //         moving_setup.enu_zd);
+
 #ifdef BOARD_BEBOP
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_obs[0],actuators_bebop.rpm_obs[1],actuators_bebop.rpm_obs[2],actuators_bebop.rpm_obs[3]);
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_ref[0],actuators_bebop.rpm_ref[1],actuators_bebop.rpm_ref[2],actuators_bebop.rpm_ref[3]);
@@ -155,7 +752,154 @@ static void logger_file_write_row(FILE *file) {
 #ifdef INS_EXT_POSE_H
   ins_ext_pos_log_data(file);
 #endif
+
+ /*
+  * These values describe the previous completed logger call,
+  * because the current call cannot know its own duration until
+  * after the row has been written.
+  */
+  fprintf(
+    file,
+    "%u,%u,",
+    (unsigned int)logger_last_write_usec,
+    (unsigned int)logger_max_write_usec
+  );
+
 #ifdef COMMAND_THRUST
+  fprintf(
+    file,
+    "%u,%f,%f,%f,",
+
+    (unsigned int)
+      indi.rate_run_count,
+
+    indi.att_error_fb.x,
+    indi.att_error_fb.y,
+    indi.att_error_fb.z
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.rate_sp.p,
+    indi.rate_sp.q,
+    indi.rate_sp.r
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.rate_feedback.p,
+    indi.rate_feedback.q,
+    indi.rate_feedback.r
+  );
+
+  /*
+  * Butterworth-filtered body rates used for finite-difference
+  * angular-acceleration estimation.
+  */
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.rate[0].o[0],
+    indi.rate[1].o[0],
+    indi.rate[2].o[0]
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.rate_d[0],
+    indi.rate_d[1],
+    indi.rate_d[2]
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.angular_accel_ref.p,
+    indi.angular_accel_ref.q,
+    indi.angular_accel_ref.r
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.u_act_dyn.p,
+    indi.u_act_dyn.q,
+    indi.u_act_dyn.r
+  );
+
+  /*
+  * Filtered actuator-model command used as the baseline for
+  * the next incremental command.
+  */
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.u[0].o[0],
+    indi.u[1].o[0],
+    indi.u[2].o[0]
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.du.p,
+    indi.du.q,
+    indi.du.r
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.u_in_unbounded.p,
+    indi.u_in_unbounded.q,
+    indi.u_in_unbounded.r
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,",
+
+    indi.u_in.p,
+    indi.u_in.q,
+    indi.u_in.r
+  );
+
+  fprintf(
+    file,
+    "%u,%u,%u,",
+
+    (unsigned int)
+      indi.saturated_p,
+
+    (unsigned int)
+      indi.saturated_q,
+
+    (unsigned int)
+      indi.saturated_r
+  );
+
+  fprintf(
+    file,
+    "%f,%f,%f,%f,",
+
+    indi.g1.p,
+    indi.g1.q,
+    indi.g1.r,
+    indi.g2
+  );
+
   fprintf(file, "%d,%d,%d,%d\n",
       stabilization_cmd[COMMAND_THRUST], stabilization_cmd[COMMAND_ROLL],
       stabilization_cmd[COMMAND_PITCH], stabilization_cmd[COMMAND_YAW]);
@@ -163,7 +907,6 @@ static void logger_file_write_row(FILE *file) {
   fprintf(file, "%d,%d\n", h_ctl_aileron_setpoint, h_ctl_elevator_setpoint);
 #endif
 
-  fflush(file);
 }
 
 
@@ -182,6 +925,10 @@ void logger_file_start(void)
       return;
     }
   }
+  /*
+  * Buffer CSV output in userspace to avoid forcing a storage
+  * operation after every 128 Hz logger row.
+  */
 
   // Get current date/time for filename
   char date_time[80];
@@ -203,14 +950,50 @@ void logger_file_start(void)
   }
 
   logger_file = fopen(filename, "w");
-  if(!logger_file) {
-    printf("[logger_file] ERROR opening log file %s!\n", filename);
+
+  if (logger_file == NULL) {
+    printf(
+      "[logger_file] ERROR opening log file %s!\n",
+      filename
+    );
     return;
   }
 
-  printf("[logger_file] Start logging to %s...\n", filename);
+  /*
+  * setvbuf must be called after fopen and before the first
+  * write to this stream.
+  */
+  if (setvbuf(
+        logger_file,
+        logger_file_buffer,
+        _IOFBF,
+        sizeof(logger_file_buffer)
+      ) != 0) {
 
+    printf(
+      "[logger_file] WARNING: could not configure file buffer.\n"
+    );
+  }
+
+  logger_flush_counter = 0;
+  logger_last_write_usec = 0;
+  logger_max_write_usec = 0;
+
+  printf(
+    "[logger_file] Start logging to %s...\n",
+    filename
+  );
+
+  /*
+  * Write the CSV header exactly once.
+  */
   logger_file_write_header(logger_file);
+
+  /*
+  * One startup flush is acceptable. It ensures the header has
+  * left the userspace buffer before the flight begins.
+  */
+  fflush(logger_file);
 }
 
 /** Stop the logger an nicely close the file */
@@ -222,11 +1005,28 @@ void logger_file_stop(void)
   }
 }
 
-/** Log the values to a csv file    */
 void logger_file_periodic(void)
 {
   if (logger_file == NULL) {
     return;
   }
+
+  const uint32_t write_start_usec =
+    get_sys_time_usec();
+
   logger_file_write_row(logger_file);
+
+  /*
+   * Do not call fflush() from the periodic flight-control path.
+   * fclose() in logger_file_stop() will flush the buffer.
+   */
+
+  logger_last_write_usec =
+    get_sys_time_usec() - write_start_usec;
+
+  if (logger_last_write_usec >
+      logger_max_write_usec) {
+    logger_max_write_usec =
+      logger_last_write_usec;
+  }
 }

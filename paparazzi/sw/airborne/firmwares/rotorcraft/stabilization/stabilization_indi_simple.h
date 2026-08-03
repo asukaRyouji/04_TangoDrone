@@ -59,11 +59,64 @@ struct IndiEstimation {
 
 struct IndiVariables {
   float cutoff_r;
+
+  /*
+   * Quaternion-vector attitude feedback used by the
+   * attitude-to-rate controller.
+   *
+   * These are not Euler-angle errors in radians. They are the
+   * vector components of the shortest quaternion error, or the
+   * tilt/twist decomposition when TILT_TWIST_CTRL is enabled.
+   */
+  struct FloatVect3 att_error_fb;
+
+  /*
+   * Body-rate setpoint generated from attitude error.
+   */
+  struct FloatRates rate_sp;
+
+  /*
+   * Actual body rate used by the rate controller. This may be
+   * raw or low-pass filtered depending on the compile-time
+   * STABILIZATION_INDI_FILTER_* settings.
+   */
+  struct FloatRates rate_feedback;
+
+  /*
+   * Desired angular acceleration.
+   */
   struct FloatRates angular_accel_ref;
+
+  /*
+   * Incremental INDI command.
+   */
   struct FloatRates du;
+
+  /*
+   * Total command before and after INDI saturation.
+   */
+  struct FloatRates u_in_unbounded;
   struct FloatRates u_in;
+
+  /*
+   * First-order actuator-dynamics model state.
+   */
   struct FloatRates u_act_dyn;
+
+  /*
+   * Angular acceleration estimated by differentiating the
+   * filtered gyro signal.
+   */
   float rate_d[3];
+
+  /*
+   * Diagnostic execution counter and saturation flags.
+   */
+  uint32_t rate_run_count;
+
+  uint8_t saturated_p;
+  uint8_t saturated_q;
+  uint8_t saturated_r;
 
   Butterworth2LowPass u[3];
   Butterworth2LowPass rate[3];
