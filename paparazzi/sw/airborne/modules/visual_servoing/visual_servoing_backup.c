@@ -38,7 +38,7 @@
 #endif
 
 #ifndef VS_NOM_THROTTLE
-#define VS_NOM_THROTTLE 0.676
+#define VS_NOM_THROTTLE 0.666
 #endif
 
 #ifndef VS_SET_POINT
@@ -54,11 +54,11 @@
 #endif
 
 #ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 0.0
+#define VS_OL_Y_OF_GAIN 4.8
 #endif
 
 #ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 0.0
+#define VS_OL_Y_YAW_GAIN 4.8
 #endif
 
 #ifndef VS_OL_Y_OA_GAIN
@@ -141,51 +141,12 @@
  *
  * Position is in metres, velocity in m/s and output in m/s^2.
  */
-/*
- * Fixed, aircraft-specific forward pitch feedforward.
- *
- * The airframe normally overrides this using:
- *
- *   VS_FIXED_PITCH_TRIM_DEG
- */
-
-#ifndef VS_FIXED_PITCH_TRIM_DEG
-#define VS_FIXED_PITCH_TRIM_DEG (-1.95f)
-#endif
-
 #ifndef VS_FWD_KP
 #define VS_FWD_KP 0.50f
 #endif
 
 #ifndef VS_FWD_KD
-#define VS_FWD_KD 1.30f
-#endif
-
-/*
- * Forward integral gain.
- *
- * The integral state has units m*s. Multiplying it by a gain with
- * units 1/s^3 produces an acceleration contribution in m/s^2.
- *
- * Start conservatively. This term should adapt trim mismatch
- * slowly, not replace the P and D controller.
- */
-#ifndef VS_FWD_KI
-#define VS_FWD_KI 0.00f
-#endif
-
-/*
- * Maximum magnitude of the integral acceleration contribution.
- *
- * 0.20 m/s^2 corresponds to approximately:
- *
- *   atan(0.20 / 9.81) = 1.17 degrees
- *
- * This is sufficient to correct a meaningful trim error while
- * preventing the integrator from commanding a large pitch bias.
- */
-#ifndef VS_FWD_I_MAX_ACCEL
-#define VS_FWD_I_MAX_ACCEL 0.20f
+#define VS_FWD_KD 1.10f
 #endif
 
 /*
@@ -275,50 +236,6 @@
 #define VS_MAX_ROLL_DEG 4.0f
 #endif
 
-/*
- * ==============================================================
- * Settle-before-activation parameters
- * ==============================================================
- */
-
-/*
- * Maximum absolute forward speed permitted before activation.
- *
- * 0.015 m/s = 1.5 cm/s.
- */
-#ifndef VS_SETTLE_FWD_SPEED_MAX
-#define VS_SETTLE_FWD_SPEED_MAX 0.015f
-#endif
-
-/*
- * Maximum absolute rightward speed permitted before activation.
- *
- * Slightly less strict because the current no-target controller
- * does not hold an absolute lateral position.
- */
-#ifndef VS_SETTLE_RIGHT_SPEED_MAX
-#define VS_SETTLE_RIGHT_SPEED_MAX 0.025f
-#endif
-
-/*
- * Maximum absolute vertical speed permitted before activation.
- */
-#ifndef VS_SETTLE_VERTICAL_SPEED_MAX
-#define VS_SETTLE_VERTICAL_SPEED_MAX 0.040f
-#endif
-
-/*
- * All three conditions must remain continuously valid for this
- * duration. Any violation resets the timer to zero.
- */
-#ifndef VS_SETTLE_DWELL_TIME
-#define VS_SETTLE_DWELL_TIME 0.30f
-#endif
-
-#ifndef VS_SETTLE_FILTER_CUTOFF
-#define VS_SETTLE_FILTER_CUTOFF 2.0f
-#endif
-
 // define and initialise global variables
 float fps = 0;
 float end_time = 0;
@@ -375,34 +292,14 @@ static void send_vs_attitude(struct transport_tx *trans, struct link_device *dev
 #error Please define ORANGE_AVOIDER_VISUAL_DETECTION_ID to be COLOR_OBJECT_DETECTION1_ID or COLOR_OBJECT_DETECTION2_ID in your airframe
 #endif
 static abi_event color_detection_ev;
-
-static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32_t stamp, int16_t pixel_x, int16_t pixel_y,
-    int16_t __attribute__((unused)) pixel_width, int16_t __attribute__((unused)) pixel_height,
+static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32_t stamp,
+    int16_t pixel_x, int16_t pixel_y, int16_t __attribute__((unused)) pixel_width, int16_t __attribute__((unused)) pixel_height,
     int32_t quality, int16_t __attribute__((unused)) extra)
 {
   /*
-   * The detector currently sends several callbacks containing the
-   * same source-image timestamp. Process each source frame once.
+   * Store all fields belonging to this image first.
    */
-  static bool have_previous_source_stamp = false;
-  static uint32_t previous_source_stamp = 0;
-
-  if (have_previous_source_stamp &&
-      stamp == previous_source_stamp) {
-    return;
-  }
-
-  previous_source_stamp = stamp;
-  have_previous_source_stamp = true;
-
-  /*
-   * Use the monotonic onboard receive time for controller timing.
-   *
-   * The detector's source stamp appears to contain only the
-   * microsecond part of the current second and therefore wraps at
-   * approximately 1,000,000.
-   */
-  visual_servoing.vision_stamp_us = get_sys_time_usec();
+  visual_servoing.vision_stamp_us = stamp;
 
   visual_servoing.color_count = (float)quality;
 
@@ -411,7 +308,10 @@ static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32
   visual_servoing.box_centroid_y = (float)pixel_y;
 
   /*
-   * Increment last so the observer sees a complete new sample.
+   * Increment the sequence counter last.
+   *
+   * The guidance loop treats the changed sequence number as
+   * evidence that the complete sample above is ready.
    */
   visual_servoing.vision_sequence++;
 }
@@ -420,6 +320,8 @@ static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32
 struct VisualServoing visual_servoing;
 
 void visual_servoing_module_init(void);
+
+void visual_servoing_module_enter(void);
 
 void visual_servoing_module_run(bool in_flight);
 
@@ -442,12 +344,6 @@ static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt);
  * when visual-servoing mode is entered.
  */
 static void visual_servoing_capture_reference(void);
-
-/*
- * Evaluate the settle-before-activation gate while standard NAV
- * remains active.
- */
-static void visual_servoing_update_activation(uint32_t now_us);
 
 /*
  * Clear optic-flow states after startup, target loss,
@@ -557,18 +453,13 @@ void visual_servoing_module_init(void)
   visual_servoing.yaw_vel = 0.0f;
 
   /*
-  * Forward-position PID controller parameters.
-  */
-
+   * Forward-position controller parameters.
+   */
   visual_servoing.fwd_kp = VS_FWD_KP;
 
   visual_servoing.fwd_kd = VS_FWD_KD;
 
-  visual_servoing.fwd_ki = VS_FWD_KI;
-
   visual_servoing.fwd_max_accel = VS_FWD_MAX_ACCEL;
-
-  visual_servoing.fwd_i_max_accel = VS_FWD_I_MAX_ACCEL;
 
   /*
    * Lateral controller parameters.
@@ -617,50 +508,6 @@ void visual_servoing_module_init(void)
   visual_servoing.using_of_control = false;
   visual_servoing.using_lateral_fallback = false;
 
-  /*
-   * Settle-before-activation configuration.
-   */
-  visual_servoing.settle_fwd_speed_max = VS_SETTLE_FWD_SPEED_MAX;
-
-  visual_servoing.settle_right_speed_max = VS_SETTLE_RIGHT_SPEED_MAX;
-
-  visual_servoing.settle_vertical_speed_max = VS_SETTLE_VERTICAL_SPEED_MAX;
-
-  visual_servoing.settle_dwell_time = VS_SETTLE_DWELL_TIME;
-
-  /*
-   * Settle-before-activation state.
-   */
-  visual_servoing.activation_state = VS_ACTIVATION_IDLE;
-
-  visual_servoing.activation_requested = false;
-
-  visual_servoing.settle_condition = false;
-
-  visual_servoing.settle_ready = false;
-
-  visual_servoing.mode_switch_issued = false;
-
-  visual_servoing.settle_condition_start_us = 0U;
-
-  visual_servoing.settle_elapsed = 0.0f;
-
-  visual_servoing.settle_forward_velocity = 0.0f;
-
-  visual_servoing.settle_right_velocity = 0.0f;
-
-  visual_servoing.settle_vertical_velocity = 0.0f;
-
-  /*
-   * Settle-velocity filter initialization.
-   */
-  visual_servoing.settle_forward_velocity_filtered = 0.0f;
-  visual_servoing.settle_right_velocity_filtered = 0.0f;
-  visual_servoing.settle_vertical_velocity_filtered = 0.0f;
-
-  visual_servoing.settle_filter_last_time_us = 0U;
-  visual_servoing.settle_filter_initialized = false;
-
   visual_servoing.vision_valid_streak = 0;
   visual_servoing.vision_dt = 0.0f;
   visual_servoing.vision_age = 1000.0f;
@@ -685,25 +532,7 @@ void visual_servoing_module_init(void)
   visual_servoing.mu_x_trim = 0.0f;
   visual_servoing.mu_y_trim = 0.0f;
 
-  /*
-  * Forward PID state and diagnostics.
-  */
-  visual_servoing.forward_error_integral = 0.0f;
-
-  visual_servoing.forward_p_cmd = 0.0f;
-
-  visual_servoing.forward_d_cmd = 0.0f;
-
-  visual_servoing.forward_i_cmd = 0.0f;
-
-  visual_servoing.forward_accel_unbounded = 0.0f;
-
   visual_servoing.forward_accel_cmd = 0.0f;
-
-  visual_servoing.forward_i_limited = false;
-
-  visual_servoing.forward_accel_saturated = false;
-
   visual_servoing.of_scaled = 0.0f;
 
   visual_servoing.mu_x_control = 0.0f;
@@ -813,104 +642,6 @@ static void reset_all_vars(void)
   visual_servoing_capture_reference();
 }
 
-void visual_servoing_request_start(void)
-{
-  /*
-   * Make repeated requests harmless.
-   *
-   * Flight-plan functions can sometimes be evaluated repeatedly,
-   * so an existing SETTLE/READY/ACTIVE state must not restart the
-   * one-second timer.
-   */
-  if (
-      visual_servoing.activation_state == VS_ACTIVATION_SETTLE ||
-      visual_servoing.activation_state == VS_ACTIVATION_READY ||
-      visual_servoing.activation_state == VS_ACTIVATION_ACTIVE
-  ) {
-    return;
-  }
-
-  /*
-   * Arm the state machine.
-   *
-   * Do not change AP mode here. Standard NAV must continue holding
-   * the aircraft while the observer evaluates the conditions.
-   */
-  visual_servoing.activation_requested = true;
-
-  visual_servoing.activation_state = VS_ACTIVATION_SETTLE;
-
-  visual_servoing.settle_condition = false;
-
-  visual_servoing.settle_ready = false;
-
-  visual_servoing.mode_switch_issued = false;
-
-  visual_servoing.settle_condition_start_us = 0U;
-
-  visual_servoing.settle_elapsed = 0.0f;
-
-  visual_servoing.settle_forward_velocity = 0.0f;
-
-  visual_servoing.settle_right_velocity = 0.0f;
-
-  visual_servoing.settle_vertical_velocity = 0.0f;
-
-  visual_servoing.settle_filter_initialized = false;
-  visual_servoing.settle_filter_last_time_us = get_sys_time_usec();
-
-  visual_servoing.settle_forward_velocity_filtered = 0.0f;
-
-  visual_servoing.settle_right_velocity_filtered = 0.0f;
-
-  visual_servoing.settle_vertical_velocity_filtered = 0.0f;
-}
-
-
-void visual_servoing_cancel_request(void)
-{
-  /*
-   * Clear all request and timing state.
-   *
-   * The caller remains responsible for selecting AP_MODE_NAV when
-   * cancelling an already-active visual-servo run.
-   */
-  visual_servoing.activation_requested = false;
-
-  visual_servoing.activation_state = VS_ACTIVATION_IDLE;
-
-  visual_servoing.settle_condition = false;
-
-  visual_servoing.settle_ready = false;
-
-  visual_servoing.mode_switch_issued = false;
-
-  visual_servoing.settle_condition_start_us = 0U;
-
-  visual_servoing.settle_elapsed = 0.0f;
-
-  visual_servoing.settle_filter_initialized = false;
-  visual_servoing.settle_filter_last_time_us = get_sys_time_usec();
-
-  visual_servoing.settle_forward_velocity_filtered = 0.0f;
-
-  visual_servoing.settle_right_velocity_filtered = 0.0f;
-
-  visual_servoing.settle_vertical_velocity_filtered = 0.0f;
-}
-
-
-bool visual_servoing_is_ready(void)
-{
-  return visual_servoing.settle_ready;
-}
-
-
-bool visual_servoing_is_active(void)
-{
-  return guidance_h.mode == GUIDANCE_H_MODE_MODULE;
-}
-
 static float visual_servoing_slew(float current, float target, float rate_limit, float dt)
 {
   /*
@@ -963,67 +694,18 @@ static void visual_servoing_capture_reference(void)
 {
   const struct NedCoor_f *position = stateGetPositionNed_f();
 
-  const struct FloatEulers *attitude = stateGetNedToBodyEulers_f();
-
   /*
-  * ============================================================
-  * Capture heading and persistent horizontal hover trim
-  * ============================================================
-  */
-
-  /*
-  * Keep the previous standard-guidance heading setpoint as the
-  * fixed visual-servo heading reference.
-  *
-  * This also defines the fixed forward axis used by the forward
-  * position controller.
-  */
+   * Capture the previous standard-hover attitude setpoint.
+   *
+   * stab_att_sp_euler still contains the setpoint generated by
+   * the ordinary horizontal hover controller immediately before
+   * GUIDANCE_H_MODE_MODULE is entered.
+   */
   visual_servoing.heading_ref = ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.psi);
 
-  /*
-  * The standard horizontal-guidance integral contribution is
-  * expressed as an earth-frame NED angle vector:
-  *
-  *   x = north angle contribution
-  *   y = east angle contribution
-  *
-  * guidance_h_i_cmd_diag is already in INT32_ANGLE_FRAC and can
-  * therefore be converted directly to radians.
-  *
-  * Do not use guidance_h_trim_att_integrator directly here:
-  * that variable is the high-resolution internal accumulator and
-  * is not directly an angle in INT32_ANGLE_FRAC.
-  */
-  const float trim_i_n = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.x);
+  visual_servoing.pitch_trim = ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.theta);
 
-  const float trim_i_e = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.y);
-
-  /*
-  * Reproduce Paparazzi's standard earth-command-to-body-command
-  * rotation.
-  *
-  * The standard controller uses measured yaw for this conversion,
-  * rather than the heading setpoint.
-  */
-  const float trim_psi = attitude->psi;
-
-  const float trim_sin_psi = sinf(trim_psi);
-
-  const float trim_cos_psi = cosf(trim_psi);
-
-  /*
-  * Convert the persistent earth-frame integral contribution to
-  * body-frame roll and pitch:
-  *
-  *   roll  = -sin(psi) * north + cos(psi) * east
-  *   pitch = -(cos(psi) * north + sin(psi) * east)
-  *
-  * These equations match stabilization_attitude_set_earth_cmd_i().
-  */
-  visual_servoing.roll_trim = -trim_sin_psi * trim_i_n + trim_cos_psi * trim_i_e;
-
-  // visual_servoing.pitch_trim = -(trim_cos_psi * trim_i_n + trim_sin_psi * trim_i_e);
-  visual_servoing.pitch_trim = RadOfDeg(VS_FIXED_PITCH_TRIM_DEG);
+  visual_servoing.roll_trim = ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.phi);
 
   /*
    * Do not capture a large transient as permanent hover trim.
@@ -1117,33 +799,9 @@ static void visual_servoing_capture_reference(void)
 
   visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
 
-  /*
-  * ============================================================
-  * Reset forward PID state at every module entry
-  * ============================================================
-  *
-  * The new integral must never be carried from one visual-servo
-  * activation to another. Each activation captures a new position
-  * reference and must begin with zero accumulated position error.
-  */
-  visual_servoing.forward_error_integral = 0.0f;
-
-  visual_servoing.forward_p_cmd = 0.0f;
-
-  visual_servoing.forward_d_cmd = 0.0f;
-
-  visual_servoing.forward_i_cmd = 0.0f;
-
-  visual_servoing.forward_accel_unbounded = 0.0f;
-
   visual_servoing.forward_accel_cmd = 0.0f;
 
-  visual_servoing.forward_i_limited = false;
-
-  visual_servoing.forward_accel_saturated = false;
-
   visual_servoing.mu_x_control = 0.0f;
-
   visual_servoing.mu_y_of = 0.0f;
   visual_servoing.mu_y_yaw = 0.0f;
   visual_servoing.mu_y_fallback = 0.0f;
@@ -1321,296 +979,6 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
   visual_servoing.of_ready = visual_servoing.vision_valid_streak >= visual_servoing.vision_min_streak;
 }
 
-static void visual_servoing_update_activation(uint32_t now_us)
-{
-  /*
-   * If MODULE already owns horizontal guidance, activation has
-   * completed.
-   */
-  if (guidance_h.mode == GUIDANCE_H_MODE_MODULE) {
-    visual_servoing.activation_state = VS_ACTIVATION_ACTIVE;
-    return;
-  }
-
-  /*
-   * If MODULE was active but another block has since returned the
-   * aircraft to NAV, return the activation state to IDLE.
-   */
-  if (
-      visual_servoing.activation_state == VS_ACTIVATION_ACTIVE && guidance_h.mode != GUIDANCE_H_MODE_MODULE
-  ) {
-    visual_servoing_cancel_request();
-
-    return;
-  }
-
-  /*
-   * No request is pending.
-   */
-  if (!visual_servoing.activation_requested) {
-    return;
-  }
-
-  /*
-   * The gate may operate while normal NAV or HOVER owns the
-   * horizontal controller.
-   *
-   * Your STDBY flight-plan block normally uses NAV.
-   */
-  const bool allowed_horizontal_mode = guidance_h.mode == GUIDANCE_H_MODE_NAV || guidance_h.mode == GUIDANCE_H_MODE_HOVER;
-
-  /*
-   * The readiness check should never activate MODULE:
-   *
-   *   - before takeoff;
-   *   - with stale external pose;
-   *   - while an unexpected horizontal mode is active.
-   */
-  const bool gate_available = autopilot_in_flight() && visual_servoing.pose_ok && allowed_horizontal_mode;
-
-  if (!gate_available) {
-    visual_servoing.settle_condition = false;
-
-    visual_servoing.settle_ready = false;
-
-    visual_servoing.settle_condition_start_us = 0U;
-
-    visual_servoing.settle_elapsed = 0.0f;
-
-    return;
-  }
-
-  const struct NedCoor_f *speed = stateGetSpeedNed_f();
-
-  /*
-   * Use the measured aircraft yaw to express the NED velocity in
-   * the actual body-forward/body-right frame.
-   *
-   * This is only a readiness measurement. It is not copied into
-   * the visual-servo controller.
-   */
-  const float psi = stateGetNedToBodyEulers_f()->psi;
-
-  const float cos_psi = cosf(psi);
-
-  const float sin_psi = sinf(psi);
-
-  /*
-   * NED velocity projected onto body-forward:
-   *
-   *   v_forward =
-   *       cos(psi) * v_north
-   *     + sin(psi) * v_east
-   */
-  visual_servoing.settle_forward_velocity = cos_psi * speed->x + sin_psi * speed->y;
-
-  /*
-   * NED velocity projected onto body-right:
-   *
-   *   v_right =
-   *      -sin(psi) * v_north
-   *      +cos(psi) * v_east
-   */
-  visual_servoing.settle_right_velocity = -sin_psi * speed->x + cos_psi * speed->y;
-
-  /*
-   * NED vertical speed:
-   *
-   *   positive = downward
-   *   negative = upward
-   */
-  visual_servoing.settle_vertical_velocity = speed->z;
-
-  float filter_dt = 1.0e-6f * (float)(now_us - visual_servoing.settle_filter_last_time_us);
-
-  visual_servoing.settle_filter_last_time_us = now_us;
-
-  if (!isfinite(filter_dt) || filter_dt <= 0.0f || filter_dt > 0.1f) {
-    filter_dt = 1.0f / 128.0f;
-  }
-
-  const float tau = 1.0f / (2.0f * (float)M_PI * VS_SETTLE_FILTER_CUTOFF);
-
-  const float alpha = filter_dt / (tau + filter_dt);
-
-  if (!visual_servoing.settle_filter_initialized) {
-
-  visual_servoing.settle_forward_velocity_filtered = visual_servoing.settle_forward_velocity;
-
-  visual_servoing.settle_right_velocity_filtered = visual_servoing.settle_right_velocity;
-
-  visual_servoing.settle_vertical_velocity_filtered = visual_servoing.settle_vertical_velocity;
-
-  visual_servoing.settle_filter_initialized = true;
-
-} else {
-
-  visual_servoing.settle_forward_velocity_filtered += alpha * (visual_servoing.settle_forward_velocity - visual_servoing.settle_forward_velocity_filtered);
-
-  visual_servoing.settle_right_velocity_filtered += alpha * (visual_servoing.settle_right_velocity - visual_servoing.settle_right_velocity_filtered);
-
-  visual_servoing.settle_vertical_velocity_filtered += alpha * (visual_servoing.settle_vertical_velocity - visual_servoing.settle_vertical_velocity_filtered);
-}
-
-  const bool forward_ok = fabsf(visual_servoing.settle_forward_velocity_filtered) <= visual_servoing.settle_fwd_speed_max;
-
-  const bool right_ok = fabsf(visual_servoing.settle_right_velocity_filtered) <= visual_servoing.settle_right_speed_max;
-
-  const bool vertical_ok = fabsf(visual_servoing.settle_vertical_velocity_filtered) <= visual_servoing.settle_vertical_speed_max;
-
-  visual_servoing.settle_condition = forward_ok && right_ok && vertical_ok;
-
-  /*
-   * Any single threshold violation breaks the uninterrupted
-   * settled interval and resets the dwell timer.
-   */
-  if (!visual_servoing.settle_condition) {
-    visual_servoing.settle_condition_start_us = 0U;
-
-    visual_servoing.settle_elapsed = 0.0f;
-
-    visual_servoing.settle_ready = false;
-
-    return;
-  }
-
-  /*
-   * First observer cycle of a new uninterrupted settled interval.
-   */
-  if (
-      visual_servoing.settle_condition_start_us == 0U
-  ) {
-    visual_servoing.settle_condition_start_us = now_us;
-
-    visual_servoing.settle_elapsed = 0.0f;
-
-    return;
-  }
-
-  /*
-   * Unsigned subtraction remains correct through normal uint32
-   * timestamp wraparound.
-   */
-  visual_servoing.settle_elapsed = 1.0e-6f * (float)(now_us - visual_servoing.settle_condition_start_us);
-
-  if (visual_servoing.settle_elapsed < visual_servoing.settle_dwell_time) {
-    return;
-  }
-
-  /*
-   * The aircraft has now remained continuously settled for the
-   * full dwell duration.
-   */
-  visual_servoing.settle_ready = true;
-
-  visual_servoing.activation_state = VS_ACTIVATION_READY;
-
-  /*
-   * Issue the mode switch only once.
-   */
-  if (!visual_servoing.mode_switch_issued) {
-    visual_servoing.mode_switch_issued = true;
-
-    /*
-     * Use the same coherent autopilot-mode transition that the
-     * original flight-plan setModule() function used.
-     *
-     * Do not call guidance_h_mode_changed() directly. The complete
-     * autopilot mode should remain consistent with the horizontal
-     * guidance mode.
-     */
-    autopilot_static_set_mode(AP_MODE_MODULE);
-
-    /*
-     * autopilot_static_set_mode() normally changes the guidance
-     * mode synchronously. If it was rejected for any reason, allow
-     * another attempt on the next observer cycle.
-     */
-    if (guidance_h.mode != GUIDANCE_H_MODE_MODULE) {
-      visual_servoing.mode_switch_issued = false;
-    }
-  }
-}
-
-void visual_servoing_observer_periodic(void)
-{
-  const uint32_t now_us = get_sys_time_usec();
-
-  /*
-   * Process each VISUAL_DETECTION callback at most once.
-   *
-   * This function is scheduled independently of the horizontal
-   * guidance mode, so it also runs while the aircraft remains in
-   * ordinary NAV/HOVER mode.
-   */
-  visual_servoing_process_new_vision_sample(now_us);
-
-  /*
-   * Age of the latest accepted visual target sample.
-   */
-  if (visual_servoing.last_valid_vision_rx_us == 0U) {
-    visual_servoing.vision_age = 1000.0f;
-  } else {
-    visual_servoing.vision_age = 1.0e-6f * (float)(now_us - visual_servoing.last_valid_vision_rx_us);
-  }
-
-  /*
-   * Never retain stale optic flow after target loss or a long
-   * visual-processing gap.
-   */
-  if (visual_servoing.vision_age > visual_servoing.vision_timeout) {
-    visual_servoing.vision_valid = false;
-    visual_servoing_reset_of_state();
-  }
-
-  /*
-   * Pose health is logged in shadow mode as well.
-   *
-   * The observer does not command the aircraft; this flag only
-   * determines whether OF is permitted to become control-ready.
-   */
-  visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
-
-  /*
-  * Do not erase the visual estimate merely because external pose
-  * is unavailable. The observer is also used for motors-off
-  * vision calibration.
-  *
-  * Flight actuation remains protected because module_run() requires
-  * both pose_ok and of_ready before applying optic-flow control.
-  */
-  if (!visual_servoing.pose_ok) {
-    visual_servoing.using_of_control = false;
-    visual_servoing.using_lateral_fallback = false;
-  }
-
-    /*
-   * Evaluate automatic activation after pose health has been
-   * updated.
-   *
-   * During SETTLE, this function only reads state. Standard NAV
-   * continues producing the actual attitude commands.
-   */
-  visual_servoing_update_activation(now_us);
-
-  /*
-   * Shadow-mode candidate terms.
-   *
-   * These diagnostics are calculated in every horizontal mode, but
-   * this observer never applies them to the aircraft.
-   */
-  const struct FloatRates *rates = stateGetBodyRates_f();
-
-  visual_servoing.yaw_vel = rates->r;
-
-  visual_servoing.of_scaled = visual_servoing.of_scale * visual_servoing.of_y;
-
-  visual_servoing.mu_y_of = -visual_servoing.ol_y_OF_gain * visual_servoing.of_scaled;
-
-  visual_servoing.mu_y_yaw = visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
-
-}
-
 
 void visual_servoing_module_run(bool in_flight)
 {
@@ -1651,12 +1019,41 @@ void visual_servoing_module_run(bool in_flight)
    * ============================================================
    */
 
+  visual_servoing_process_new_vision_sample(now_us);
+
   /*
-   * The same observer also runs periodically in normal NAV/HOVER.
-   * The sequence counter prevents a camera frame from being
-   * processed twice.
+   * Calculate age of the latest accepted target sample.
    */
-  // visual_servoing_observer_periodic();
+  if (visual_servoing.last_valid_vision_rx_us == 0) {
+    visual_servoing.vision_age = 1000.0f;
+  } else {
+    visual_servoing.vision_age = 1.0e-6f * (float)(now_us - visual_servoing.last_valid_vision_rx_us);
+  }
+
+  /*
+   * Clear stale optic flow.
+   */
+  if (visual_servoing.vision_age > visual_servoing.vision_timeout) {
+    visual_servoing.vision_valid = false;
+
+    visual_servoing_reset_of_state();
+  }
+
+  /*
+   * ============================================================
+   * 3. Check external-pose health
+   * ============================================================
+   */
+
+  visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
+
+  /*
+   * Optic-flow control is not allowed to remain active when the
+   * position/attitude estimator is stale.
+   */
+  if (!visual_servoing.pose_ok) {
+    visual_servoing_reset_of_state();
+  }
 
   /*
    * ============================================================
@@ -1695,211 +1092,24 @@ void visual_servoing_module_run(bool in_flight)
    * ============================================================
    */
 
-  /*
-  * ============================================================
-  * 5. Forward position PID hold
-  * ============================================================
-  */
-
-  /*
-  * Position error in the fixed entry-heading forward frame.
-  *
-  * Positive error means:
-  *
-  *   current forward position < captured reference
-  *
-  * so the aircraft needs positive physical forward acceleration.
-  */
   visual_servoing.forward_error = visual_servoing.forward_position_ref - visual_servoing.forward_position;
 
-  /*
-  * Reset per-cycle diagnostics before checking estimator health.
-  */
-  visual_servoing.forward_p_cmd = 0.0f;
-
-  visual_servoing.forward_d_cmd = 0.0f;
-
-  visual_servoing.forward_accel_unbounded = 0.0f;
-
-  visual_servoing.forward_accel_cmd = 0.0f;
-
-  visual_servoing.forward_accel_saturated = false;
-
-  /*
-  * Only update and apply the forward controller when:
-  *
-  *   1. the aircraft is actually in flight; and
-  *   2. the external-pose estimator is healthy and fresh.
-  *
-  * A stale position must never be integrated.
-  */
-  if (in_flight && visual_servoing.pose_ok) {
-
+  if (visual_servoing.pose_ok) {
+    visual_servoing.forward_accel_cmd =
+        visual_servoing.fwd_kp * visual_servoing.forward_error
+        - visual_servoing.fwd_kd * visual_servoing.forward_velocity;
+  } else {
     /*
-    * Proportional contribution:
-    *
-    *   positive position error
-    *       -> positive desired forward acceleration
-    */
-    visual_servoing.forward_p_cmd = visual_servoing.fwd_kp * visual_servoing.forward_error;
-
-    /*
-    * Derivative contribution.
-    *
-    * This uses measured forward velocity rather than a numerical
-    * derivative of position error:
-    *
-    *   positive forward velocity
-    *       -> negative acceleration contribution
-    */
-    visual_servoing.forward_d_cmd = -visual_servoing.fwd_kd * visual_servoing.forward_velocity;
-
-    /*
-    * ==========================================================
-    * Candidate integral update
-    * ==========================================================
-    *
-    * Build a candidate state first. Do not immediately overwrite
-    * the real integral state because the candidate may push the
-    * total controller farther into saturation.
-    */
-    if (visual_servoing.fwd_ki > 1.0e-6f && isfinite(control_dt) && control_dt > 0.0f) {
-
-      float candidate_error_integral = visual_servoing.forward_error_integral + visual_servoing.forward_error * control_dt;
-
-      /*
-      * Convert the candidate state to its acceleration
-      * contribution.
-      */
-      float candidate_i_cmd = visual_servoing.fwd_ki * candidate_error_integral;
-
-      /*
-      * Apply the dedicated integral-output limit.
-      *
-      * Clamp the acceleration contribution first, then reconstruct
-      * the corresponding integral state. This guarantees that the
-      * stored state and logged I command remain consistent.
-      */
-      Bound(
-        candidate_i_cmd,
-        -visual_servoing.fwd_i_max_accel,
-        visual_servoing.fwd_i_max_accel
-      );
-
-      candidate_error_integral = candidate_i_cmd / visual_servoing.fwd_ki;
-
-      /*
-      * Evaluate the complete candidate PID output before accepting
-      * the new integral state.
-      */
-      const float candidate_accel_unbounded = visual_servoing.forward_p_cmd + visual_servoing.forward_d_cmd + candidate_i_cmd;
-
-      const bool candidate_saturates_positive = candidate_accel_unbounded > visual_servoing.fwd_max_accel;
-
-      const bool candidate_saturates_negative = candidate_accel_unbounded < -visual_servoing.fwd_max_accel;
-
-      /*
-      * Conditional-integration anti-windup.
-      *
-      * Reject an update only when it would drive the controller
-      * farther into the same saturation:
-      *
-      *   positive output saturation + positive error
-      *   negative output saturation + negative error
-      *
-      * An error with the opposite sign is still accepted because
-      * it unwinds the existing integral and helps leave saturation.
-      */
-      const bool candidate_winds_further_into_saturation =
-        (candidate_saturates_positive && visual_servoing.forward_error > 0.0f) || (candidate_saturates_negative && visual_servoing.forward_error < 0.0f);
-
-      if (!candidate_winds_further_into_saturation) {
-        visual_servoing.forward_error_integral = candidate_error_integral;
-      }
-    }
-    else {
-      /*
-      * A disabled or invalid integral gain must not leave an old
-      * integral state active.
-      */
-      visual_servoing.forward_error_integral = 0.0f;
-    }
-
-    /*
-    * Calculate the accepted integral contribution.
-    */
-    visual_servoing.forward_i_cmd = visual_servoing.fwd_ki * visual_servoing.forward_error_integral;
-
-    /*
-    * Apply the I limit again as final numerical protection.
-    */
-    Bound(
-      visual_servoing.forward_i_cmd,
-      -visual_servoing.fwd_i_max_accel,
-      visual_servoing.fwd_i_max_accel
-    );
-
-    /*
-    * Keep the stored integral exactly consistent with the bounded
-    * acceleration contribution.
-    */
-    if (visual_servoing.fwd_ki > 1.0e-6f) {
-      visual_servoing.forward_error_integral = visual_servoing.forward_i_cmd / visual_servoing.fwd_ki;
-    }
-
-    /*
-    * Report whether the dedicated integral limit is active.
-    */
-    visual_servoing.forward_i_limited = fabsf(visual_servoing.forward_i_cmd) >= (visual_servoing.fwd_i_max_accel - 1.0e-5f);
-
-    /*
-    * Complete physical forward acceleration before total limiting.
-    */
-    visual_servoing.forward_accel_unbounded = visual_servoing.forward_p_cmd + visual_servoing.forward_d_cmd + visual_servoing.forward_i_cmd;
-
-    visual_servoing.forward_accel_cmd = visual_servoing.forward_accel_unbounded;
-
-    /*
-    * Bound the complete P + D + I acceleration command.
-    */
-    Bound(
-      visual_servoing.forward_accel_cmd,
-      -visual_servoing.fwd_max_accel,
-      visual_servoing.fwd_max_accel
-    );
-
-    /*
-    * Record complete-controller saturation separately from the
-    * dedicated I limit.
-    */
-    visual_servoing.forward_accel_saturated = fabsf(visual_servoing.forward_accel_unbounded - visual_servoing.forward_accel_cmd) > 1.0e-5f;
-  }
-  else {
-    /*
-    * External pose is stale or the aircraft is not in flight.
-    *
-    * Freeze the stored integral state. Do not accumulate stale
-    * position error and do not apply the forward controller.
-    *
-    * forward_i_cmd remains available as a diagnostic showing the
-    * frozen integrator state, but forward_accel_cmd is zero.
-    */
-    visual_servoing.forward_i_cmd = visual_servoing.fwd_ki * visual_servoing.forward_error_integral;
-
-    Bound(
-      visual_servoing.forward_i_cmd,
-      -visual_servoing.fwd_i_max_accel,
-      visual_servoing.fwd_i_max_accel
-    );
-
-    visual_servoing.forward_i_limited = fabsf(visual_servoing.forward_i_cmd) >= (visual_servoing.fwd_i_max_accel - 1.0e-5f);
-
-    visual_servoing.forward_accel_unbounded = 0.0f;
-
+     * Do not continue position correction from a stale estimate.
+     */
     visual_servoing.forward_accel_cmd = 0.0f;
-
-    visual_servoing.forward_accel_saturated = false;
   }
+
+  Bound(
+    visual_servoing.forward_accel_cmd,
+    -visual_servoing.fwd_max_accel,
+     visual_servoing.fwd_max_accel
+  );
 
   /*
    * Paparazzi/Bebop sign convention:
@@ -2382,24 +1592,7 @@ void guidance_h_module_init(void)
 
 void guidance_h_module_enter(void)
 {
-  /*
-   * Capture the actual visual-servo reference only now, after the
-   * settle gate has completed and Paparazzi has selected MODULE.
-   */
   reset_all_vars();
-
-  /*
-   * Mark activation complete.
-   *
-   * Clear activation_requested so leaving MODULE later cannot
-   * automatically cause an unintended re-entry.
-   */
-  visual_servoing.activation_state =
-    VS_ACTIVATION_ACTIVE;
-
-  visual_servoing.activation_requested = false;
-
-  visual_servoing.mode_switch_issued = false;
 }
 
 void guidance_h_module_read_rc(void)

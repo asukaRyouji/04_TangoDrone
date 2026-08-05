@@ -6,7 +6,7 @@
     Exercise module for Autonomous Flight of MAV Course
     </description>
     <section name="VS" prefix="VS_">
-      <define name="NOM_THROTTLE" value="0.676" description="nominal throttle"/>
+      <define name="NOM_THROTTLE" value="0.73" description="nominal throttle"/>
       <define name="SET_POINT" value="0.1" description="divergence set-point"/>
       <define name="OL_X_PGAIN" value="0.1" description="outer loop x proportional gain"/>
       <define name="OL_X_IGAIN" value="0" description="outer loop x integral gain"/>
@@ -23,170 +23,6 @@
       <define name="THETA_OFFSET" value="0.01" description="offset for theta"/>
       <define name="CC_THRESHOLD" value="5000" description="Threshold of orange pixels for manual switching to new set-point"/>
       <define name="NEW_SET_POINT" value="0.3" description="New divergence set-point when switching is set to manual"/>
-            <!--
-        ==========================================================
-        Flight mode and legacy experiment selection
-        ==========================================================
-      -->
-
-      <define
-        name="MANUAL_SWITCHING"
-        value="0"
-        description="Enable manual visual-servo switching"/>
-
-      <define
-        name="APPROACH_MODE"
-        value="3"
-        description="Visual-servo approach mode"/>
-
-      <define
-        name="ABLATION_MODE"
-        value="0"
-        description="Visual-servo ablation mode"/>
-
-      <define
-        name="OL_Y_OA_GAIN"
-        value="0.0"
-        description="Legacy lateral obstacle-avoidance gain"/>
-
-      <define
-        name="OL_X_VEL_PGAIN"
-        value="10.0"
-        description="Legacy forward velocity proportional gain"/>
-
-
-      <!--
-        ==========================================================
-        Forward position PID controller
-        ==========================================================
-      -->
-
-      <define
-        name="FWD_KP"
-        value="0.50"
-        description="Forward position proportional gain"/>
-
-      <define
-        name="FWD_KD"
-        value="1.30"
-        description="Forward velocity damping gain"/>
-
-      <define
-        name="FWD_KI"
-        value="0.00"
-        description="Forward position integral gain"/>
-
-      <define
-        name="FIXED_PITCH_TRIM_DEG"
-        value="-1.95"
-        description="Fixed aircraft-specific pitch feedforward in degrees"/>
-
-      <define
-        name="FWD_I_MAX_ACCEL"
-        value="0.20"
-        description="Maximum forward integral acceleration contribution"/>
-
-      <define
-        name="FWD_MAX_ACCEL"
-        value="0.40"
-        description="Maximum total forward PID acceleration command"/>
-
-
-      <!--
-        ==========================================================
-        Lateral controller
-        ==========================================================
-      -->
-
-      <define
-        name="OF_SCALE"
-        value="0.005"
-        description="Scale factor applied to lateral optic flow"/>
-
-      <define
-        name="LAT_MAX_ACCEL"
-        value="0.30"
-        description="Maximum lateral acceleration command"/>
-
-      <define
-        name="LAT_FALLBACK_KD"
-        value="0.80"
-        description="Lateral velocity damping during target loss or startup"/>
-
-      <define
-        name="ACCEL_SLEW"
-        value="1.00"
-        description="Horizontal acceleration-command slew rate"/>
-
-
-      <!--
-        ==========================================================
-        Vision validity
-        ==========================================================
-      -->
-
-      <define
-        name="VISION_MIN_DT"
-        value="0.005"
-        description="Minimum accepted interval between visual samples"/>
-
-      <define
-        name="VISION_MAX_DT"
-        value="0.25"
-        description="Maximum accepted interval between visual samples"/>
-
-      <define
-        name="VISION_TIMEOUT"
-        value="0.15"
-        description="Timeout for the most recent valid visual sample"/>
-
-      <define
-        name="VISION_MIN_STREAK"
-        value="5"
-        description="Consecutive valid visual frames required for OF actuation"/>
-
-
-      <!--
-        ==========================================================
-        Attitude-command safety limits
-        ==========================================================
-      -->
-
-      <define
-        name="MAX_PITCH_DEG"
-        value="4.0"
-        description="Maximum absolute pitch command in degrees"/>
-
-      <define
-        name="MAX_ROLL_DEG"
-        value="4.0"
-        description="Maximum absolute roll command in degrees"/>
-
-      <!--
-        ==========================================================
-        Settle-before-activation gate
-        ==========================================================
-      -->
-
-      <define
-        name="SETTLE_FWD_SPEED_MAX"
-        value="0.015"
-        description="Maximum absolute forward speed before visual-servo activation"/>
-
-      <define
-        name="SETTLE_RIGHT_SPEED_MAX"
-        value="0.025"
-        description="Maximum absolute rightward speed before visual-servo activation"/>
-
-      <define
-        name="SETTLE_VERTICAL_SPEED_MAX"
-        value="0.040"
-        description="Maximum absolute vertical speed before visual-servo activation"/>
-
-      <define
-        name="SETTLE_DWELL_TIME"
-        value="0.3"
-        description="Continuous settled duration required before visual-servo activation"/>
     </section>
   </doc>
   <settings>
@@ -220,12 +56,6 @@
   <header>
     <file name="visual_servoing.h"/>
   </header>
-  
-  <!--
-    Always process VISUAL_DETECTION samples, even while the aircraft
-    remains in ordinary NAV/HOVER. This observer never writes commands.
-  -->
-  <periodic fun="visual_servoing_observer_periodic()" freq="128"/>
   
   <makefile target="ap|nps">
     <file name="visual_servoing.c"/>

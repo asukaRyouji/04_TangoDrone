@@ -36,7 +36,6 @@
 #include "mcu_periph/sys_time.h"
 #include "state.h"
 #include "generated/airframe.h"
-#include "modules/visual_servoing/visual_servoing.h"
 
 // For optitrack multi-object position logging by Chenyao
 #include "modules/mission/moving_setup_logger_optitrack.h"
@@ -64,340 +63,12 @@ static FILE *logger_file = NULL;
 /*
  * Logger timing and buffered-write diagnostics.
  */
+static uint16_t logger_flush_counter = 0;
+
 static uint32_t logger_last_write_usec = 0;
 static uint32_t logger_max_write_usec = 0;
 
 static char logger_file_buffer[64 * 1024];
-
-static void logger_file_write_vs_activation_header(
-    FILE *file)
-{
-  fprintf(
-    file,
-    "vs_activation_state,"
-    "vs_activation_requested,"
-    "vs_settle_condition,"
-    "vs_settle_ready,"
-    "vs_mode_switch_issued,"
-    "vs_settle_elapsed,"
-    "vs_settle_forward_vel,"
-    "vs_settle_right_vel,"
-    "vs_settle_vertical_vel,"
-    "vs_settle_fwd_speed_max,"
-    "vs_settle_right_speed_max,"
-    "vs_settle_vertical_speed_max,"
-    "vs_settle_dwell_time,"
-  );
-}
-
-static void logger_file_write_vs_activation_row(
-    FILE *file)
-{
-  fprintf(
-    file,
-    "%u,%u,%u,%u,%u,"
-    "%f,%f,%f,%f,"
-    "%f,%f,%f,%f,",
-
-    (unsigned int)
-      visual_servoing.activation_state,
-
-    visual_servoing.activation_requested
-      ? 1U : 0U,
-
-    visual_servoing.settle_condition
-      ? 1U : 0U,
-
-    visual_servoing.settle_ready
-      ? 1U : 0U,
-
-    visual_servoing.mode_switch_issued
-      ? 1U : 0U,
-
-    visual_servoing.settle_elapsed,
-
-    visual_servoing.settle_forward_velocity,
-
-    visual_servoing.settle_right_velocity,
-
-    visual_servoing.settle_vertical_velocity,
-
-    visual_servoing.settle_fwd_speed_max,
-
-    visual_servoing.settle_right_speed_max,
-
-    visual_servoing.settle_vertical_speed_max,
-
-    visual_servoing.settle_dwell_time
-  );
-}
-
-/*
- * Visual-servo diagnostic fields.
- *
- * Keep the header and row in dedicated helper functions so that the
- * large visual-servo block cannot silently become misaligned.
- */
-static void logger_file_write_visual_header(FILE *file)
-{
-  fprintf(
-    file,
-    "vs_vision_stamp_us,"
-    "vs_vision_sequence,"
-    "vs_processed_sequence,"
-    "vs_new_frame,"
-    "vs_vision_valid,"
-    "vs_valid_streak,"
-    "vs_of_ready,"
-    "vs_vision_dt,"
-    "vs_vision_age,"
-    "vs_control_dt,"
-    "vs_color_count,"
-    "vs_centroid_x,"
-    "vs_centroid_y,"
-    "vs_raw_of_y,"
-    "vs_of_y,"
-    "vs_raw_of_y_d,"
-    "vs_of_y_d,"
-    "vs_yaw_vel,"
-    "vs_pose_ok,"
-    "vs_using_of,"
-    "vs_using_fallback,"
-    "vs_heading_ref,"
-    "vs_forward_axis_n,"
-    "vs_forward_axis_e,"
-    "vs_forward_ref,"
-    "vs_forward_pos,"
-    "vs_forward_vel,"
-    "vs_forward_error,"
-    "vs_right_vel,"
-    "vs_pitch_trim,"
-    "vs_roll_trim,"
-    "vs_mu_x_trim,"
-    "vs_mu_y_trim,"
-    "vs_fwd_kp,"
-    "vs_fwd_kd,"
-    "vs_of_gain,"
-    "vs_yaw_gain,"
-    "vs_fwd_max_accel,"
-    "vs_lat_max_accel,"
-    "vs_forward_accel_cmd,"
-    "vs_of_scaled,"
-    "vs_mu_x_control,"
-    "vs_mu_y_of,"
-    "vs_mu_y_yaw,"
-    "vs_mu_y_fallback,"
-    "vs_mu_y_control,"
-    "vs_mu_x_target,"
-    "vs_mu_y_target,"
-    "vs_mu_x,"
-    "vs_mu_y,"
-    "vs_mu_z,"
-    "vs_height_sp,"
-    "vs_height_error,"
-    "vs_pitch_sp,"
-    "vs_roll_sp,"
-    "vs_yaw_sp,"
-  );
-}
-
-static void logger_file_write_visual_row(FILE *file)
-{
-  fprintf(
-    file,
-    "%u,%u,%u,"
-    "%u,%u,%u,%u,"
-    "%f,%f,%f,"
-    "%f,%f,%f,"
-    "%f,%f,%f,%f,%f,"
-    "%u,%u,%u,"
-    "%f,%f,%f,"
-    "%f,%f,%f,%f,%f,"
-    "%f,%f,%f,%f,"
-    "%f,%f,%f,%f,%f,%f,"
-    "%f,%f,%f,%f,%f,%f,%f,"
-    "%f,%f,"
-    "%f,%f,%f,"
-    "%f,%f,"
-    "%f,%f,%f,",
-
-    (unsigned int)visual_servoing.vision_stamp_us,
-    (unsigned int)visual_servoing.vision_sequence,
-    (unsigned int)visual_servoing.processed_vision_sequence,
-
-    visual_servoing.vision_new_frame ? 1U : 0U,
-    visual_servoing.vision_valid ? 1U : 0U,
-    (unsigned int)visual_servoing.vision_valid_streak,
-    visual_servoing.of_ready ? 1U : 0U,
-
-    visual_servoing.vision_dt,
-    visual_servoing.vision_age,
-    visual_servoing.control_dt,
-
-    visual_servoing.color_count,
-    visual_servoing.box_centroid_x,
-    visual_servoing.box_centroid_y,
-
-    visual_servoing.raw_of_y,
-    visual_servoing.of_y,
-    visual_servoing.raw_of_y_d,
-    visual_servoing.of_y_d,
-    visual_servoing.yaw_vel,
-
-    visual_servoing.pose_ok ? 1U : 0U,
-    visual_servoing.using_of_control ? 1U : 0U,
-    visual_servoing.using_lateral_fallback ? 1U : 0U,
-
-    visual_servoing.heading_ref,
-    visual_servoing.forward_axis_n,
-    visual_servoing.forward_axis_e,
-
-    visual_servoing.forward_position_ref,
-    visual_servoing.forward_position,
-    visual_servoing.forward_velocity,
-    visual_servoing.forward_error,
-    visual_servoing.right_velocity,
-
-    visual_servoing.pitch_trim,
-    visual_servoing.roll_trim,
-    visual_servoing.mu_x_trim,
-    visual_servoing.mu_y_trim,
-
-    visual_servoing.fwd_kp,
-    visual_servoing.fwd_kd,
-    visual_servoing.ol_y_OF_gain,
-    visual_servoing.ol_y_YAW_gain,
-    visual_servoing.fwd_max_accel,
-    visual_servoing.lat_max_accel,
-
-    visual_servoing.forward_accel_cmd,
-    visual_servoing.of_scaled,
-    visual_servoing.mu_x_control,
-    visual_servoing.mu_y_of,
-    visual_servoing.mu_y_yaw,
-    visual_servoing.mu_y_fallback,
-    visual_servoing.mu_y_control,
-
-    visual_servoing.mu_x_target,
-    visual_servoing.mu_y_target,
-
-    visual_servoing.mu_x,
-    visual_servoing.mu_y,
-    visual_servoing.mu_z,
-
-    visual_servoing.height_setpoint,
-    visual_servoing.height_error,
-
-    visual_servoing.pitch_sp_cmd,
-    visual_servoing.roll_sp_cmd,
-    visual_servoing.yaw_sp_cmd
-  );
-}
-
-/*
- * Forward PID integral diagnostics.
- *
- * Keep these fields in their own paired header/row functions so
- * the existing large visual-servo CSV block remains untouched.
- */
-static void logger_file_write_forward_pid_header(
-    FILE *file)
-{
-  fprintf(
-    file,
-    "vs_fwd_ki,"
-    "vs_fwd_i_max_accel,"
-    "vs_forward_error_integral,"
-    "vs_forward_p_cmd,"
-    "vs_forward_d_cmd,"
-    "vs_forward_i_cmd,"
-    "vs_forward_accel_unbounded,"
-    "vs_forward_i_limited,"
-    "vs_forward_accel_saturated,"
-  );
-}
-
-static void logger_file_write_forward_pid_row(
-    FILE *file)
-{
-  fprintf(
-    file,
-    "%f,%f,"
-    "%f,"
-    "%f,%f,%f,"
-    "%f,"
-    "%u,%u,",
-
-    visual_servoing.fwd_ki,
-    visual_servoing.fwd_i_max_accel,
-
-    visual_servoing.forward_error_integral,
-
-    visual_servoing.forward_p_cmd,
-    visual_servoing.forward_d_cmd,
-    visual_servoing.forward_i_cmd,
-
-    visual_servoing.forward_accel_unbounded,
-
-    visual_servoing.forward_i_limited
-      ? 1U
-      : 0U,
-
-    visual_servoing.forward_accel_saturated
-      ? 1U
-      : 0U
-  );
-}
-
-/*
- * Moving flower/setup fields.
- */
-static void logger_file_write_setup_header(FILE *file)
-{
-  fprintf(
-    file,
-    "setup_valid,"
-    "setup_target_id,"
-    "setup_target_timestamp,"
-    "setup_age_ms,"
-    "setup_enu_x,"
-    "setup_enu_y,"
-    "setup_enu_z,"
-    "setup_enu_xd,"
-    "setup_enu_yd,"
-    "setup_enu_zd,"
-  );
-}
-
-static void logger_file_write_setup_row(FILE *file)
-{
-  const uint32_t now_ms = get_sys_time_msec();
-
-  const uint32_t setup_age_ms =
-    moving_setup.valid
-      ? (now_ms - moving_setup.last_rx_time)
-      : 0U;
-
-  fprintf(
-    file,
-    "%u,%u,%u,%u,"
-    "%f,%f,%f,"
-    "%f,%f,%f,",
-
-    moving_setup.valid ? 1U : 0U,
-    (unsigned int)moving_setup.target_id,
-    (unsigned int)moving_setup.target_timestamp,
-    (unsigned int)setup_age_ms,
-
-    moving_setup.enu_x,
-    moving_setup.enu_y,
-    moving_setup.enu_z,
-
-    moving_setup.enu_xd,
-    moving_setup.enu_yd,
-    moving_setup.enu_zd
-  );
-}
 
 
 /** Logging functions */
@@ -414,11 +85,6 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "vel_x,vel_y,vel_z,");
   fprintf(file, "acc_x,acc_y,acc_z,");
   fprintf(file, "att_phi,att_theta,att_psi,");
-
-  logger_file_write_vs_activation_header(file);
-  logger_file_write_visual_header(file);
-  logger_file_write_forward_pid_header(file);
-
   // fprintf(file, "distance_est,centroid_x,centroid_y,");
   // fprintf(file, "dt, color_count,");
   // fprintf(file, "raw_of_y, of_y, raw_of_y_d, of_y_d, yaw_vel,");
@@ -530,9 +196,12 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "body_p,body_q,body_r,");
 
   /*
-   * Moving setup / flower setup received from OptiTrack.
+   * Moving setup / flower setup received from OptiTrack id_num 666.
    */
-  // logger_file_write_setup_header(file);
+  // fprintf(file, "setup_valid,");
+  // fprintf(file, "setup_target_id,setup_target_timestamp,setup_age_ms,");
+  // fprintf(file, "setup_enu_x,setup_enu_y,setup_enu_z,");
+  // fprintf(file, "setup_enu_xd,setup_enu_yd,setup_enu_zd,");
 
 #ifdef BOARD_BEBOP
   fprintf(file, "rpm_obs_1,rpm_obs_2,rpm_obs_3,rpm_obs_4,");
@@ -667,10 +336,6 @@ static void logger_file_write_row(FILE *file) {
   fprintf(file, "%f,%f,%f,", vel->x, vel->y, vel->z);
   fprintf(file, "%f,%f,%f,", acc->x, acc->y, acc->z);
   fprintf(file, "%f,%f,%f,", att->phi, att->theta, att->psi);
-
-  logger_file_write_vs_activation_row(file);
-  logger_file_write_visual_row(file);
-  logger_file_write_forward_pid_row(file);
   // fprintf(file, "%f,%f,%f,", visual_servoing.distance_est, visual_servoing.box_centroid_x, visual_servoing.box_centroid_y);
   // fprintf(file, "%f,%f,", visual_servoing.dt, visual_servoing.color_count);
   // fprintf(file, "%f,%f,%f,%f,%f,", visual_servoing.raw_of_y, visual_servoing.of_y, visual_servoing.raw_of_y_d, visual_servoing.of_y_d, visual_servoing.yaw_vel);
@@ -1057,8 +722,28 @@ static void logger_file_write_row(FILE *file) {
 
   /*
    * Moving setup / flower setup data.
+   * This is the latest MOVING_SETUP_POS received onboard by the Bebop.
    */
-  // logger_file_write_setup_row(file);
+  // uint32_t now_ms = get_sys_time_msec();
+  // uint32_t setup_age_ms = moving_setup.valid ? (now_ms - moving_setup.last_rx_time) : 0;
+  // uint8_t setup_valid = moving_setup.valid ? 1 : 0;
+
+  // fprintf(file, "%u,", setup_valid);
+
+  // fprintf(file, "%u,%u,%u,",
+  //         moving_setup.target_id,
+  //         moving_setup.target_timestamp,
+  //         setup_age_ms);
+
+  // fprintf(file, "%f,%f,%f,",
+  //         moving_setup.enu_x,
+  //         moving_setup.enu_y,
+  //         moving_setup.enu_z);
+
+  // fprintf(file, "%f,%f,%f,",
+  //         moving_setup.enu_xd,
+  //         moving_setup.enu_yd,
+  //         moving_setup.enu_zd);
 
 #ifdef BOARD_BEBOP
   fprintf(file, "%d,%d,%d,%d,",actuators_bebop.rpm_obs[0],actuators_bebop.rpm_obs[1],actuators_bebop.rpm_obs[2],actuators_bebop.rpm_obs[3]);
@@ -1290,6 +975,7 @@ void logger_file_start(void)
     );
   }
 
+  logger_flush_counter = 0;
   logger_last_write_usec = 0;
   logger_max_write_usec = 0;
 

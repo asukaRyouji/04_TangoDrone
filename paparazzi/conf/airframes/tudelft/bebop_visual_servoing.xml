@@ -82,38 +82,138 @@
     <module name="cv_detect_color_object">
       <!-- <define name="OBJECT_DETECTOR_VERBOSE" value="TRUE"/> -->
       <define name="COLOR_OBJECT_DETECTOR_CAMERA1" value="front_camera"/>
-      <define name="COLOR_OBJECT_DETECTOR_FPS1" value="0"/>
+      <define name="COLOR_OBJECT_DETECTOR_FPS1" value="30"/>
       <define name="COLOR_OBJECT_DETECTOR_DRAW1" value="1"/>
     
       <define name="COLOR_OBJECT_DETECTOR_CAMERA2" value="bottom_camera"/>
       <define name="COLOR_OBJECT_DETECTOR_FPS2" value="1"/>
       <define name="COLOR_OBJECT_DETECTOR_DRAW2" value="0"/>
     </module>
+
     <module name="visual_servoing.xml">
-      <define name="VISUAL_SERVOING_CAMERA" value="front_camera"/>
-      <define name="ORANGE_AVOIDER_VISUAL_DETECTION_ID" value="COLOR_OBJECT_DETECTION1_ID"/>
-      <define name="FLOOR_VISUAL_DETECTION_ID" value="COLOR_OBJECT_DETECTION2_ID"/>
-      <define name="VS_MANUAL_SWITCHING" value="0"/>
-      <define name="VS_APPROACH_MODE" value="3"/>
-      <define name="VS_ABLATION_MODE" value="0"/>
-      <!--define name="NOM_THROTTLE" value="0.682"/ -->
-      <define name="NOM_THROTTLE" value="0.66"/>
-      <define name="SET_POINT" value="0.0"/>
-      <define name="OL_X_PGAIN" value="3"/>
-      <define name="OL_X_IGAIN" value="0.015"/>
-      <define name="OL_X_VEL_SP" value="0.0"/>
-      <define name="OL_Y_OF_GAIN" value="3.140"/>
-      <define name="OL_Y_YAW_GAIN" value="3.140"/>
-      <define name="OL_Z_PGAIN" value="5.0"/>
-      <define name="OL_Z_DGAIN" value="0.005"/>      
-      <define name="OL_Z_PFF" value="10.0"/>
-      <define name="OL_Z_SP" value="1.0"/>
-      <define name="LP_CONST" value="12"/>
-      <define name="SWITCH_MAGNITUDE" value="1.2"/>
-      <!-- define name="SWITCH_MAGNITUDE" value="1.5"/ -->
-      <define name="SWITCH_DECAY" value="1.0"/>
-      <define name="CC_THRESHOLD" value="5000"/>
+
+      <!--
+        Module infrastructure IDs.
+        These are intentionally not prefixed with VS_.
+      -->
+      <define name="VISUAL_SERVOING_CAMERA"
+              value="front_camera"/>
+
+      <define name="ORANGE_AVOIDER_VISUAL_DETECTION_ID"
+              value="COLOR_OBJECT_DETECTION1_ID"/>
+
+      <define name="FLOOR_VISUAL_DETECTION_ID"
+              value="COLOR_OBJECT_DETECTION2_ID"/>
+
+
+      <!--
+        Legacy experiment-mode parameters.
+      -->
+      <define name="VS_MANUAL_SWITCHING"
+              value="0"/>
+
+      <define name="VS_APPROACH_MODE"
+              value="3"/>
+
+      <define name="VS_ABLATION_MODE"
+              value="0"/>
+
+      <!--
+        Automatic settle-before-activation gate.
+      -->
+      <define
+        name="VS_SETTLE_FWD_SPEED_MAX"
+        value="0.015"/>
+
+      <define
+        name="VS_SETTLE_RIGHT_SPEED_MAX"
+        value="0.025"/>
+
+      <define
+        name="VS_SETTLE_VERTICAL_SPEED_MAX"
+        value="0.040"/>
+
+      <define
+        name="VS_SETTLE_DWELL_TIME"
+        value="0.3"/>
+
+      <!--
+        Forward position PID controller.
+      -->
+      <define name="VS_FWD_KP"
+              value="0.50"/>
+
+      <define name="VS_FWD_KD"
+              value="1.30"/>
+
+      <define name="VS_FWD_KI"
+              value="0.00"/>
+
+      <define name="VS_FIXED_PITCH_TRIM_DEG"
+              value="-1.95"/>
+
+      <define name="VS_FWD_I_MAX_ACCEL"
+              value="0.20"/>
+
+      <define name="VS_FWD_MAX_ACCEL"
+              value="0.40"/>
+
+
+      <!--
+        Lateral OF and fallback controller.
+      -->
+      <define name="VS_OL_Y_OF_GAIN"
+              value="0.00"/>
+
+      <define name="VS_OL_Y_YAW_GAIN"
+              value="0.00"/>
+
+      <define name="VS_OL_Y_OA_GAIN"
+              value="0.0"/>
+
+      <define name="VS_OF_SCALE"
+              value="0.005"/>
+
+      <define name="VS_LAT_MAX_ACCEL"
+              value="0.30"/>
+
+      <define name="VS_LAT_FALLBACK_KD"
+              value="0.80"/>
+
+      <define name="VS_ACCEL_SLEW"
+              value="1.00"/>
+
+
+      <!--
+        Vision-sample validity.
+      -->
+      <define name="VS_VISION_MIN_DT"
+              value="0.005"/>
+
+      <define name="VS_VISION_MAX_DT"
+              value="0.25"/>
+
+      <define name="VS_VISION_TIMEOUT"
+              value="0.15"/>
+
+      <define name="VS_VISION_MIN_STREAK"
+              value="5"/>
+
+      <define name="VS_CC_THRESHOLD"
+              value="5000"/>
+
+
+      <!--
+        Attitude-command safety limits.
+      -->
+      <define name="VS_MAX_PITCH_DEG"
+              value="4.0"/>
+
+      <define name="VS_MAX_ROLL_DEG"
+              value="4.0"/>
+
     </module>
+
     <module name="video_rtp_stream">
       <define name="VIEWVIDEO_CAMERA" value="front_camera"/>
       <define name="VIEWVIDEO_DOWNSIZE_FACTOR" value="1"/>
@@ -275,11 +375,17 @@
     <define name="G1_Q" value="0.0354"/>
     <define name="G1_R" value="0.0020"/>
     <define name="G2_R" value="0.1462"/> -->
-    <define name="G1_P" value="0.1009"/>
-    <define name="G1_Q" value="0.0581"/>
-    <define name="G1_R" value="0.0037"/>
-    <define name="G2_R" value="0.2062"/>
-  
+    <!-- control effectiveness voor 0416-->
+    <!-- define name="G1_P" value="0.1009"/ -->
+    <!--define name="G1_Q" value="0.0581"/ -->
+    <!--define name="G1_R" value="0.0037"/ -->
+    <!--define name="G2_R" value="0.2062"/ -->
+    <!-- control effectiveness voor 0428-->
+    <define name="G1_P" value="0.0694"/>
+    <define name="G1_Q" value="0.0534"/>
+    <define name="G1_R" value="0.0047"/>
+    <define name="G2_R" value="0.2412"/>
+   
 
     <define name="FILTER_ROLL_RATE" value="TRUE"/>
     <define name="FILTER_PITCH_RATE" value="TRUE"/>
@@ -313,7 +419,7 @@
     <define name="HOVER_KP" value="283"/>
     <define name="HOVER_KD" value="82"/>
     <define name="HOVER_KI" value="20"/>
-    <define name="NOMINAL_HOVER_THROTTLE" value="0.68"/>
+    <define name="NOMINAL_HOVER_THROTTLE" value="0.676"/>
     <define name="ADAPT_THROTTLE_ENABLED" value="FALSE"/>
 
     <define name="ADAPT_INITIAL_HOVER_THROTTLE" value="0.68" />
