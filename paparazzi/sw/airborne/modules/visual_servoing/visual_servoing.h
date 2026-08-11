@@ -263,13 +263,83 @@ struct VisualServoing {
   uint32_t settle_filter_last_time_us;
   bool settle_filter_initialized;
 
+    /*
+   * ============================================================
+   * Settle position gate
+   * ============================================================
+   */
+
+  /*
+   * Fixed NAV reference captured when VS_SETTLE is requested.
+   *
+   * Horizontal coordinates are NED, in metres.
+   *
+   * IMPORTANT:
+   * These are copied from guidance_h.sp.pos, i.e. the waypoint
+   * that INIT2 is already holding. They are NOT copied from the
+   * instantaneous aircraft position.
+   */
+  float settle_ref_n;
+  float settle_ref_e;
+
+  /*
+   * Vertical reference expressed as positive height above the
+   * NED origin.
+   *
+   * guidance_v_z_sp itself is NED-z, therefore negative above
+   * the origin. We convert it to positive height when captured.
+   */
+  float settle_ref_height;
+
+  /*
+   * Measured position errors used by the activation gate.
+   *
+   * horizontal_position_error:
+   *   radial horizontal distance from the captured INIT2 target.
+   *
+   * vertical_position_error:
+   *   current height - requested height.
+   *   Positive means the aircraft is too high.
+   */
+  float settle_horizontal_position_error;
+  float settle_vertical_position_error;
+
+  /*
+   * Maximum permitted position errors before MODULE activation.
+   */
+  float settle_horizontal_pos_max;
+  float settle_vertical_pos_max;
+
+  /*
+   * Diagnostics.
+   */
+  bool settle_velocity_ok;
+  bool settle_position_ok;
+  bool settle_horizontal_position_ok;
+  bool settle_vertical_position_ok;
+
   /*
    * Configurable readiness thresholds.
    */
   float settle_fwd_speed_max;
   float settle_right_speed_max;
+  float settle_raw_right_speed_max;
   float settle_vertical_speed_max;
   float settle_dwell_time;
+
+  float settle_right_position_error;
+  float settle_right_pos_max;
+  bool settle_right_position_ok;
+
+  /*
+  * External-pose loss duration.
+  *
+  * Used to distinguish a brief timing dropout from a sustained
+  * localization failure.
+  */
+  uint32_t pose_loss_start_us;
+  float pose_loss_elapsed;
+  bool pose_loss_too_long;
 
   /*
    * Indicates which lateral branch is currently active.
@@ -348,6 +418,52 @@ struct VisualServoing {
    * Hover trim captured when visual mode is entered
    * ============================================================
    */
+
+
+  /*
+   * ============================================================
+   * NAV-derived roll-trim estimator
+   * ============================================================
+   *
+   * While VS_SETTLE is active and all position/velocity entry
+   * conditions are continuously satisfied, sample the roll bias
+   * learned by the normal NAV horizontal integrator.
+   *
+   * At MODULE entry the average is frozen and becomes roll_trim.
+   */
+
+  /*
+   * Latest instantaneous NAV-derived body-roll trim sample [rad].
+   */
+  float roll_trim_sample;
+
+  /*
+   * Sum and mean of all valid samples from the current
+   * uninterrupted settled interval.
+   */
+  float roll_trim_sum;
+  float roll_trim_average;
+
+  /*
+   * Number of valid samples accumulated.
+   */
+  uint32_t roll_trim_sample_count;
+
+  /*
+   * Time at which the current trim averaging interval started.
+   */
+  uint32_t roll_trim_avg_start_us;
+
+  /*
+   * Duration of current uninterrupted trim averaging interval [s].
+   */
+  float roll_trim_avg_elapsed;
+
+  /*
+   * True only after sufficient averaging time and sufficient
+   * valid samples have been collected.
+   */
+  bool roll_trim_average_valid;
 
   /*
    * The standard horizontal hover controller normally requires
@@ -524,6 +640,8 @@ extern bool visual_servoing_is_active(void);
  * It never writes roll, pitch, yaw or thrust commands.
  */
 extern void visual_servoing_observer_periodic(void);
+
+extern bool visual_servoing_pose_loss_too_long(void);
 
 // Implement own horizontal loop:
 extern void guidance_h_module_init(void);

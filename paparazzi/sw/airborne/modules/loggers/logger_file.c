@@ -87,6 +87,17 @@ static void logger_file_write_vs_activation_header(
     "vs_settle_right_speed_max,"
     "vs_settle_vertical_speed_max,"
     "vs_settle_dwell_time,"
+    "vs_settle_ref_n,"
+    "vs_settle_ref_e,"
+    "vs_settle_ref_height,"
+    "vs_settle_horizontal_pos_error,"
+    "vs_settle_vertical_pos_error,"
+    "vs_settle_horizontal_pos_max,"
+    "vs_settle_vertical_pos_max,"
+    "vs_settle_velocity_ok,"
+    "vs_settle_position_ok,"
+    "vs_settle_horizontal_pos_ok,"
+    "vs_settle_vertical_pos_ok,"
   );
 }
 
@@ -95,9 +106,52 @@ static void logger_file_write_vs_activation_row(
 {
   fprintf(
     file,
+
+    /*
+     * Activation state.
+     */
     "%u,%u,%u,%u,%u,"
+
+    /*
+     * Settle timing.
+     */
+    "%f,"
+
+    /*
+     * Raw settle velocities.
+     */
+    "%f,%f,%f,"
+
+    /*
+     * Velocity thresholds and dwell time.
+     */
     "%f,%f,%f,%f,"
-    "%f,%f,%f,%f,",
+
+    /*
+     * Captured NAV / vertical references.
+     */
+    "%f,%f,%f,"
+
+    /*
+     * Position errors.
+     */
+    "%f,%f,"
+
+    /*
+     * Position thresholds.
+     */
+    "%f,%f,"
+
+    /*
+     * Gate diagnostics.
+     */
+    "%u,%u,%u,%u,",
+
+    /*
+     * ----------------------------------------------------------
+     * Activation state
+     * ----------------------------------------------------------
+     */
 
     (unsigned int)
       visual_servoing.activation_state,
@@ -114,24 +168,82 @@ static void logger_file_write_vs_activation_row(
     visual_servoing.mode_switch_issued
       ? 1U : 0U,
 
+    /*
+     * ----------------------------------------------------------
+     * Settle timing
+     * ----------------------------------------------------------
+     */
+
     visual_servoing.settle_elapsed,
 
+    /*
+     * ----------------------------------------------------------
+     * Raw body-aligned velocities
+     * ----------------------------------------------------------
+     */
+
     visual_servoing.settle_forward_velocity,
-
     visual_servoing.settle_right_velocity,
-
     visual_servoing.settle_vertical_velocity,
 
+    /*
+     * ----------------------------------------------------------
+     * Velocity limits + dwell
+     * ----------------------------------------------------------
+     */
+
     visual_servoing.settle_fwd_speed_max,
-
     visual_servoing.settle_right_speed_max,
-
     visual_servoing.settle_vertical_speed_max,
+    visual_servoing.settle_dwell_time,
 
-    visual_servoing.settle_dwell_time
+    /*
+     * ----------------------------------------------------------
+     * Captured entry references
+     * ----------------------------------------------------------
+     */
+
+    visual_servoing.settle_ref_n,
+    visual_servoing.settle_ref_e,
+    visual_servoing.settle_ref_height,
+
+    /*
+     * ----------------------------------------------------------
+     * Position errors
+     * ----------------------------------------------------------
+     */
+
+    visual_servoing.settle_horizontal_position_error,
+    visual_servoing.settle_vertical_position_error,
+
+    /*
+     * ----------------------------------------------------------
+     * Position thresholds
+     * ----------------------------------------------------------
+     */
+
+    visual_servoing.settle_horizontal_pos_max,
+    visual_servoing.settle_vertical_pos_max,
+
+    /*
+     * ----------------------------------------------------------
+     * Individual gate status
+     * ----------------------------------------------------------
+     */
+
+    visual_servoing.settle_velocity_ok
+      ? 1U : 0U,
+
+    visual_servoing.settle_position_ok
+      ? 1U : 0U,
+
+    visual_servoing.settle_horizontal_position_ok
+      ? 1U : 0U,
+
+    visual_servoing.settle_vertical_position_ok
+      ? 1U : 0U
   );
 }
-
 /*
  * Visual-servo diagnostic fields.
  *

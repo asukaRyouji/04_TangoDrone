@@ -126,6 +126,10 @@
 #define VS_CC_THRESHOLD 5000
 #endif
 
+#ifndef VS_POSE_LOSS_ABORT_TIME
+#define VS_POSE_LOSS_ABORT_TIME 0.30f
+#endif
+
 /*
  * ==============================================================
  * Forward-position hold
@@ -153,12 +157,75 @@
 #define VS_FIXED_PITCH_TRIM_DEG (-1.95f)
 #endif
 
+/*
+ * ==============================================================
+ * Roll-trim estimation during VS_SETTLE
+ * ==============================================================
+ */
+
+/*
+ * Fallback roll trim.
+ *
+ * This is used only if MODULE is entered without a valid
+ * pre-entry NAV roll-trim average.
+ *
+ * Normal VS_SETTLE -> MODULE activation should use the measured
+ * average instead.
+ */
+#ifndef VS_ROLL_TRIM_FALLBACK_DEG
+
+/*
+ * Backward compatibility:
+ *
+ * If your current airframe still defines VS_FIXED_ROLL_TRIM_DEG,
+ * use that value as the fallback so the airframe XML does not have
+ * to be changed immediately.
+ */
+#ifdef VS_FIXED_ROLL_TRIM_DEG
+#define VS_ROLL_TRIM_FALLBACK_DEG VS_FIXED_ROLL_TRIM_DEG
+#else
+#define VS_ROLL_TRIM_FALLBACK_DEG (-0.80f)
+#endif
+
+#endif
+
+
+/*
+ * Require at least 0.50 s of continuously settled NAV data for
+ * the roll-trim estimate.
+ *
+ * This is deliberately longer than the current 0.30 s settle
+ * dwell.
+ */
+#ifndef VS_ROLL_TRIM_AVG_TIME
+#define VS_ROLL_TRIM_AVG_TIME 0.50f
+#endif
+
+
+/*
+ * Minimum number of valid samples.
+ *
+ * At ~128 Hz observer rate, 0.50 s normally gives ~64 samples.
+ * Twenty is only a sanity guard against abnormally sparse updates.
+ */
+#ifndef VS_ROLL_TRIM_MIN_SAMPLES
+#define VS_ROLL_TRIM_MIN_SAMPLES 20U
+#endif
+
+
+/*
+ * Reject / clamp implausibly large NAV trim samples.
+ */
+#ifndef VS_ROLL_TRIM_ABS_MAX_DEG
+#define VS_ROLL_TRIM_ABS_MAX_DEG 3.0f
+#endif
+
 #ifndef VS_FWD_KP
-#define VS_FWD_KP 0.50f
+#define VS_FWD_KP 0.80f
 #endif
 
 #ifndef VS_FWD_KD
-#define VS_FWD_KD 1.30f
+#define VS_FWD_KD 2.00f
 #endif
 
 /*
@@ -171,7 +238,7 @@
  * slowly, not replace the P and D controller.
  */
 #ifndef VS_FWD_KI
-#define VS_FWD_KI 0.00f
+#define VS_FWD_KI 0.03f
 #endif
 
 /*
@@ -185,7 +252,7 @@
  * preventing the integrator from commanding a large pitch bias.
  */
 #ifndef VS_FWD_I_MAX_ACCEL
-#define VS_FWD_I_MAX_ACCEL 0.20f
+#define VS_FWD_I_MAX_ACCEL 0.08f
 #endif
 
 /*
@@ -227,7 +294,7 @@
  * ready. This is not a lateral position controller.
  */
 #ifndef VS_LAT_FALLBACK_KD
-#define VS_LAT_FALLBACK_KD 0.80f
+#define VS_LAT_FALLBACK_KD 1.20f
 #endif
 
 /*
@@ -301,10 +368,21 @@
 #endif
 
 /*
+ * Maximum absolute raw rightward speed permitted before activation.
+ *
+ * Slightly less strict because the current no-target controller
+ * does not hold an absolute lateral position.
+ */
+#ifndef VS_SETTLE_RAW_RIGHT_SPEED_MAX
+#define VS_SETTLE_RAW_RIGHT_SPEED_MAX 0.020f
+#endif
+
+
+/*
  * Maximum absolute vertical speed permitted before activation.
  */
 #ifndef VS_SETTLE_VERTICAL_SPEED_MAX
-#define VS_SETTLE_VERTICAL_SPEED_MAX 0.040f
+#define VS_SETTLE_VERTICAL_SPEED_MAX 0.030f
 #endif
 
 /*
@@ -317,6 +395,30 @@
 
 #ifndef VS_SETTLE_FILTER_CUTOFF
 #define VS_SETTLE_FILTER_CUTOFF 2.0f
+#endif
+
+/*
+ * Maximum horizontal distance from the NAV/INIT2 position
+ * permitted before visual-servo activation.
+ *
+ * 0.050 m = 5 cm.
+ */
+#ifndef VS_SETTLE_HORIZONTAL_POS_MAX
+#define VS_SETTLE_HORIZONTAL_POS_MAX 0.050f
+#endif
+
+#ifndef VS_SETTLE_RIGHT_POS_MAX
+#define VS_SETTLE_RIGHT_POS_MAX 0.020f
+#endif
+
+/*
+ * Maximum vertical distance from the active guidance_v height
+ * setpoint permitted before visual-servo activation.
+ *
+ * 0.050 m = 5 cm.
+ */
+#ifndef VS_SETTLE_VERTICAL_POS_MAX
+#define VS_SETTLE_VERTICAL_POS_MAX 0.050f
 #endif
 
 // define and initialise global variables
@@ -438,6 +540,36 @@ static void visual_servoing_kf_init(float of_meas, float ofd_meas);
 static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt);
 
 /*
+ * ==============================================================
+ * NAV-derived roll-trim estimator
+ * ==============================================================
+ */
+
+/*
+ * Compute one instantaneous body-frame roll-trim estimate from
+ * the standard NAV horizontal-guidance integral contribution.
+ *
+ * Returns:
+ *   true  -> valid sample written to *roll_trim_out
+ *   false -> no valid sample available
+ */
+static bool visual_servoing_get_nav_roll_trim(float *roll_trim_out);
+
+
+/*
+ * Clear all state belonging to the current uninterrupted
+ * roll-trim averaging interval.
+ */
+static void visual_servoing_reset_roll_trim_average(void);
+
+
+/*
+ * Add the current NAV-derived roll-trim sample to the running
+ * average while the lateral roll-trim condition remains valid.
+ */
+static void visual_servoing_update_roll_trim_average(uint32_t now_us);
+
+/*
  * Capture forward-position, heading and hover-trim references
  * when visual-servoing mode is entered.
  */
@@ -556,6 +688,10 @@ void visual_servoing_module_init(void)
 
   visual_servoing.yaw_vel = 0.0f;
 
+  visual_servoing.pose_loss_start_us = 0U;
+  visual_servoing.pose_loss_elapsed = 0.0f;
+  visual_servoing.pose_loss_too_long = false;
+
   /*
   * Forward-position PID controller parameters.
   */
@@ -624,9 +760,17 @@ void visual_servoing_module_init(void)
 
   visual_servoing.settle_right_speed_max = VS_SETTLE_RIGHT_SPEED_MAX;
 
+  visual_servoing.settle_raw_right_speed_max = VS_SETTLE_RAW_RIGHT_SPEED_MAX;
+
   visual_servoing.settle_vertical_speed_max = VS_SETTLE_VERTICAL_SPEED_MAX;
 
   visual_servoing.settle_dwell_time = VS_SETTLE_DWELL_TIME;
+
+  visual_servoing.settle_horizontal_pos_max = VS_SETTLE_HORIZONTAL_POS_MAX;
+
+  visual_servoing.settle_vertical_pos_max = VS_SETTLE_VERTICAL_POS_MAX;
+
+  visual_servoing.settle_right_pos_max = VS_SETTLE_RIGHT_POS_MAX;
 
   /*
    * Settle-before-activation state.
@@ -650,6 +794,39 @@ void visual_servoing_module_init(void)
   visual_servoing.settle_right_velocity = 0.0f;
 
   visual_servoing.settle_vertical_velocity = 0.0f;
+
+  /*
+   * Roll-trim estimator.
+   *
+   * No valid pre-entry NAV roll-bias estimate exists at module
+   * initialization.
+   */
+  visual_servoing_reset_roll_trim_average();
+
+  /*
+   * Position-gate state.
+   */
+  visual_servoing.settle_ref_n = 0.0f;
+  visual_servoing.settle_ref_e = 0.0f;
+  visual_servoing.settle_ref_height = 0.0f;
+
+  visual_servoing.settle_horizontal_position_error = 0.0f;
+
+  visual_servoing.settle_right_position_error = 0.0f;
+
+  visual_servoing.settle_vertical_position_error = 0.0f;
+
+
+  visual_servoing.settle_velocity_ok = false;
+
+  visual_servoing.settle_position_ok = false;
+
+
+  visual_servoing.settle_horizontal_position_ok = false;
+
+  visual_servoing.settle_right_position_ok = false;
+
+  visual_servoing.settle_vertical_position_ok = false;
 
   /*
    * Settle-velocity filter initialization.
@@ -831,6 +1008,65 @@ void visual_servoing_request_start(void)
   }
 
   /*
+   * ============================================================
+   * Start a fresh NAV roll-trim estimate
+   * ============================================================
+   *
+   * This line executes only for a genuinely new activation
+   * request.
+   *
+   * Repeated presses while already SETTLE/READY/ACTIVE return
+   * above and therefore do NOT destroy the current average.
+   */
+  visual_servoing_reset_roll_trim_average();
+
+  /*
+   * ============================================================
+   * Capture the existing NAV target
+   * ============================================================
+   *
+   * The experimental workflow is:
+   *
+   *   INIT2 -> stay WP_2 -> VS_SETTLE
+   *
+   * Therefore guidance_h.sp.pos is already WP_2 when this
+   * function is called.
+   *
+   * Capture the commanded NAV position, NOT the instantaneous
+   * aircraft position.
+   */
+
+  visual_servoing.settle_ref_n = POS_FLOAT_OF_BFP(guidance_h.sp.pos.x);
+
+  visual_servoing.settle_ref_e = POS_FLOAT_OF_BFP(guidance_h.sp.pos.y);
+
+  /*
+   * guidance_v uses NED-z:
+   *
+   *   z < 0 means above the origin.
+   *
+   * Store the desired height as a positive number.
+   */
+  visual_servoing.settle_ref_height = -POS_FLOAT_OF_BFP(guidance_v_z_sp);
+
+  visual_servoing.settle_horizontal_position_error = 0.0f;
+
+  visual_servoing.settle_right_position_error = 0.0f;
+
+  visual_servoing.settle_vertical_position_error = 0.0f;
+
+
+  visual_servoing.settle_velocity_ok = false;
+
+  visual_servoing.settle_position_ok = false;
+
+
+  visual_servoing.settle_horizontal_position_ok = false;
+
+  visual_servoing.settle_right_position_ok = false;
+
+  visual_servoing.settle_vertical_position_ok = false;
+  /*
    * Arm the state machine.
    *
    * Do not change AP mode here. Standard NAV must continue holding
@@ -864,6 +1100,7 @@ void visual_servoing_request_start(void)
   visual_servoing.settle_right_velocity_filtered = 0.0f;
 
   visual_servoing.settle_vertical_velocity_filtered = 0.0f;
+  
 }
 
 
@@ -897,6 +1134,24 @@ void visual_servoing_cancel_request(void)
   visual_servoing.settle_right_velocity_filtered = 0.0f;
 
   visual_servoing.settle_vertical_velocity_filtered = 0.0f;
+
+  visual_servoing.settle_horizontal_position_error = 0.0f;
+
+  visual_servoing.settle_right_position_error = 0.0f;
+
+  visual_servoing.settle_vertical_position_error = 0.0f;
+
+
+  visual_servoing.settle_velocity_ok = false;
+
+  visual_servoing.settle_position_ok = false;
+
+
+  visual_servoing.settle_horizontal_position_ok = false;
+
+  visual_servoing.settle_right_position_ok = false;
+
+  visual_servoing.settle_vertical_position_ok = false;
 }
 
 
@@ -959,11 +1214,255 @@ static void visual_servoing_reset_of_state(void)
   visual_servoing.using_of_control = false;
 }
 
+/*
+ * ==============================================================
+ * NAV-derived roll-trim estimator
+ * ==============================================================
+ */
+
+static bool visual_servoing_get_nav_roll_trim(float *roll_trim_out)
+{
+  /*
+   * Caller must provide storage for the result.
+   */
+  if (roll_trim_out == NULL) {
+    return false;
+  }
+
+
+  /*
+   * ============================================================
+   * 1. Read the persistent NAV horizontal integral contribution
+   * ============================================================
+   *
+   * guidance_h_i_cmd_diag is expressed as an earth-frame NED
+   * angular command:
+   *
+   *   x = north component
+   *   y = east component
+   *
+   * It is already stored in INT32_ANGLE_FRAC, therefore
+   * ANGLE_FLOAT_OF_BFP() converts it directly to radians.
+   *
+   * IMPORTANT:
+   * Do NOT use guidance_h_trim_att_integrator here. That is the
+   * higher-resolution internal integrator state and is not directly
+   * an angle in INT32_ANGLE_FRAC.
+   */
+
+  const float trim_i_n = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.x);
+
+  const float trim_i_e = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.y);
+
+
+  /*
+   * ============================================================
+   * 2. Read current measured yaw
+   * ============================================================
+   *
+   * Paparazzi's standard horizontal guidance rotates the NED
+   * command into the body frame using measured yaw.
+   *
+   * We reproduce that same transformation here.
+   */
+
+  const float psi = stateGetNedToBodyEulers_f()->psi;
+
+
+  /*
+   * Reject invalid estimator/guidance values.
+   */
+  if (!isfinite(trim_i_n) || !isfinite(trim_i_e) || !isfinite(psi)) {
+    return false;
+  }
+
+
+  const float sin_psi = sinf(psi);
+  const float cos_psi = cosf(psi);
+
+
+  /*
+   * ============================================================
+   * 3. Convert earth-frame NAV integral into body-frame roll
+   * ============================================================
+   *
+   * Same convention that your previous instantaneous trim
+   * implementation used:
+   *
+   *   roll =
+   *       -sin(psi) * trim_i_n
+   *       +cos(psi) * trim_i_e
+   */
+
+  float sample = -sin_psi * trim_i_n +  cos_psi * trim_i_e;
+
+
+  if (!isfinite(sample)) {
+    return false;
+  }
+
+
+  /*
+   * ============================================================
+   * 4. Safety bound
+   * ============================================================
+   *
+   * We do not want one abnormal NAV-integrator value to create
+   * an extreme MODULE feed-forward trim.
+   */
+
+  BoundAbs(
+    sample,
+    RadOfDeg(
+      VS_ROLL_TRIM_ABS_MAX_DEG
+    )
+  );
+
+
+  /*
+   * Return the valid bounded sample.
+   */
+  *roll_trim_out = sample;
+
+  return true;
+}
+
+
+/*
+ * ==============================================================
+ * Reset the current averaging interval
+ * ==============================================================
+ */
+
+static void visual_servoing_reset_roll_trim_average(void)
+{
+  /*
+   * Latest instantaneous sample.
+   */
+  visual_servoing.roll_trim_sample = 0.0f;
+
+
+  /*
+   * Running accumulator.
+   */
+  visual_servoing.roll_trim_sum = 0.0f;
+
+
+  /*
+   * Until valid NAV samples exist, expose the fallback value in
+   * roll_trim_average for diagnostics.
+   *
+   * IMPORTANT:
+   * roll_trim_average_valid remains false, therefore this fallback
+   * is NOT treated as a measured estimate.
+   */
+  visual_servoing.roll_trim_average = RadOfDeg(VS_ROLL_TRIM_FALLBACK_DEG);
+
+
+  /*
+   * No samples accumulated.
+   */
+  visual_servoing.roll_trim_sample_count = 0U;
+
+
+  /*
+   * No averaging window active.
+   */
+  visual_servoing.roll_trim_avg_start_us = 0U;
+
+
+  /*
+   * No elapsed averaging time.
+   */
+  visual_servoing.roll_trim_avg_elapsed = 0.0f;
+
+
+  /*
+   * The average cannot be used for MODULE entry yet.
+   */
+  visual_servoing.roll_trim_average_valid = false;
+}
+
+
+/*
+ * ==============================================================
+ * Update the average during one valid SETTLE observer cycle
+ * ==============================================================
+ */
+
+static void visual_servoing_update_roll_trim_average(uint32_t now_us)
+{
+  float sample = 0.0f;
+
+
+  /*
+   * Obtain one instantaneous NAV-derived body-roll trim estimate.
+   *
+   * We require an uninterrupted sequence of valid samples.
+   * Therefore an invalid sample destroys the current averaging
+   * interval rather than silently inserting zero or continuing
+   * across bad data.
+   */
+  if (!visual_servoing_get_nav_roll_trim(&sample)) {
+    visual_servoing_reset_roll_trim_average();
+
+    return;
+  }
+
+
+  /*
+   * First valid sample of this uninterrupted averaging interval.
+   */
+  if (visual_servoing.roll_trim_avg_start_us == 0U) 
+  {visual_servoing.roll_trim_avg_start_us =
+      now_us;
+  }
+
+
+  /*
+   * Store latest instantaneous sample for diagnostics.
+   */
+  visual_servoing.roll_trim_sample = sample;
+
+
+  /*
+   * Accumulate.
+   */
+  visual_servoing.roll_trim_sum += sample;
+
+
+  visual_servoing.roll_trim_sample_count++;
+
+
+  /*
+   * Arithmetic mean in radians.
+   */
+  visual_servoing.roll_trim_average = visual_servoing.roll_trim_sum / (float) visual_servoing.roll_trim_sample_count;
+
+
+  /*
+   * Wrap-safe timer.
+   *
+   * Unsigned uint32 subtraction is appropriate for normal
+   * get_sys_time_usec() wraparound.
+   */
+  visual_servoing.roll_trim_avg_elapsed = 1.0e-6f * (float)(now_us - visual_servoing.roll_trim_avg_start_us);
+
+
+  /*
+   * The average becomes usable only when BOTH conditions hold:
+   *
+   *   1. enough uninterrupted time has elapsed;
+   *   2. enough actual samples were accumulated.
+   */
+  visual_servoing.roll_trim_average_valid = (visual_servoing.roll_trim_avg_elapsed >= VS_ROLL_TRIM_AVG_TIME)
+      &&
+      (visual_servoing.roll_trim_sample_count >= VS_ROLL_TRIM_MIN_SAMPLES);
+}
+
 static void visual_servoing_capture_reference(void)
 {
   const struct NedCoor_f *position = stateGetPositionNed_f();
-
-  const struct FloatEulers *attitude = stateGetNedToBodyEulers_f();
 
   /*
   * ============================================================
@@ -981,55 +1480,51 @@ static void visual_servoing_capture_reference(void)
   visual_servoing.heading_ref = ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.psi);
 
   /*
-  * The standard horizontal-guidance integral contribution is
-  * expressed as an earth-frame NED angle vector:
-  *
-  *   x = north angle contribution
-  *   y = east angle contribution
-  *
-  * guidance_h_i_cmd_diag is already in INT32_ANGLE_FRAC and can
-  * therefore be converted directly to radians.
-  *
-  * Do not use guidance_h_trim_att_integrator directly here:
-  * that variable is the high-resolution internal accumulator and
-  * is not directly an angle in INT32_ANGLE_FRAC.
-  */
-  const float trim_i_n = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.x);
+   * ============================================================
+   * Freeze the NAV-derived roll trim
+   * ============================================================
+   *
+   * Normal path:
+   *
+   *   VS_SETTLE
+   *      -> complete velocity + position gate
+   *      -> average NAV integral roll bias
+   *      -> roll_trim_average_valid
+   *      -> AP_MODE_MODULE
+   *      -> this function
+   *
+   * Therefore the normal automatic path should always enter this
+   * function with a valid roll_trim_average.
+   */
 
-  const float trim_i_e = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.y);
+  if (visual_servoing.roll_trim_average_valid) {
+
+    /*
+     * Freeze the measured average for the complete ACTIVE period.
+     */
+    visual_servoing.roll_trim = visual_servoing.roll_trim_average;
+
+  } else {
+
+    /*
+     * Fallback only.
+     *
+     * This protects an unexpected manual MODULE entry that bypasses
+     * VS_SETTLE.
+     */
+    visual_servoing.roll_trim = RadOfDeg(VS_ROLL_TRIM_FALLBACK_DEG);
+  }
+
 
   /*
-  * Reproduce Paparazzi's standard earth-command-to-body-command
-  * rotation.
-  *
-  * The standard controller uses measured yaw for this conversion,
-  * rather than the heading setpoint.
-  */
-  const float trim_psi = attitude->psi;
-
-  const float trim_sin_psi = sinf(trim_psi);
-
-  const float trim_cos_psi = cosf(trim_psi);
-
-  /*
-  * Convert the persistent earth-frame integral contribution to
-  * body-frame roll and pitch:
-  *
-  *   roll  = -sin(psi) * north + cos(psi) * east
-  *   pitch = -(cos(psi) * north + sin(psi) * east)
-  *
-  * These equations match stabilization_attitude_set_earth_cmd_i().
-  */
-  visual_servoing.roll_trim = -trim_sin_psi * trim_i_n + trim_cos_psi * trim_i_e;
-
-  // visual_servoing.pitch_trim = -(trim_cos_psi * trim_i_n + trim_sin_psi * trim_i_e);
+   * Forward pitch bias remains fixed at the already identified
+   * aircraft-specific value.
+   */
   visual_servoing.pitch_trim = RadOfDeg(VS_FIXED_PITCH_TRIM_DEG);
 
+
   /*
-   * Do not capture a large transient as permanent hover trim.
-   *
-   * Previous hover data showed trim of roughly one degree, so
-   * a three-degree bound is conservative.
+   * Final defensive bounds.
    */
   BoundAbs(
     visual_servoing.pitch_trim,
@@ -1038,7 +1533,7 @@ static void visual_servoing_capture_reference(void)
 
   BoundAbs(
     visual_servoing.roll_trim,
-    RadOfDeg(3.0f)
+    RadOfDeg(VS_ROLL_TRIM_ABS_MAX_DEG)
   );
 
   /*
@@ -1054,9 +1549,7 @@ static void visual_servoing_capture_reference(void)
    *
    * No corresponding lateral-position reference is captured.
    */
-  visual_servoing.forward_position_ref =
-      visual_servoing.forward_axis_n * position->x
-    + visual_servoing.forward_axis_e * position->y;
+  visual_servoing.forward_position_ref = visual_servoing.forward_axis_n * position->x + visual_servoing.forward_axis_e * position->y;
 
   visual_servoing.forward_position = visual_servoing.forward_position_ref;
 
@@ -1369,6 +1862,7 @@ static void visual_servoing_update_activation(uint32_t now_us)
   const bool gate_available = autopilot_in_flight() && visual_servoing.pose_ok && allowed_horizontal_mode;
 
   if (!gate_available) {
+
     visual_servoing.settle_condition = false;
 
     visual_servoing.settle_ready = false;
@@ -1377,9 +1871,23 @@ static void visual_servoing_update_activation(uint32_t now_us)
 
     visual_servoing.settle_elapsed = 0.0f;
 
+
+    visual_servoing.settle_velocity_ok = false;
+
+    visual_servoing.settle_position_ok = false;
+
+
+    visual_servoing.settle_horizontal_position_ok = false;
+
+    visual_servoing.settle_right_position_ok = false;
+
+    visual_servoing.settle_vertical_position_ok = false;
+
+
+    visual_servoing_reset_roll_trim_average();
+
     return;
   }
-
   const struct NedCoor_f *speed = stateGetSpeedNed_f();
 
   /*
@@ -1451,56 +1959,141 @@ static void visual_servoing_update_activation(uint32_t now_us)
 
   visual_servoing.settle_vertical_velocity_filtered += alpha * (visual_servoing.settle_vertical_velocity - visual_servoing.settle_vertical_velocity_filtered);
 }
+  /*
+   * ============================================================
+   * Position part of the activation gate
+   * ============================================================
+   */
+
+  const struct NedCoor_f *position = stateGetPositionNed_f();
+
+  /*
+   * Horizontal displacement from the fixed NAV/INIT2 target.
+   */
+  const float position_error_n = position->x - visual_servoing.settle_ref_n;
+
+  const float position_error_e = position->y - visual_servoing.settle_ref_e;
+
+  visual_servoing.settle_horizontal_position_error = sqrtf(position_error_n * position_error_n + position_error_e * position_error_e);
+
+  /*
+   * ============================================================
+   * Body-right position error
+   * ============================================================
+   *
+   * Project the NED displacement from the fixed INIT2 target onto
+   * the aircraft's measured body-right axis.
+   *
+   * This uses the same measured yaw transformation as the existing
+   * right-velocity gate and as the NAV-derived body-roll trim.
+   *
+   * Positive:
+   *   aircraft is to the right of the INIT2 target.
+   *
+   * Negative:
+   *   aircraft is to the left of the INIT2 target.
+   */
+  visual_servoing.settle_right_position_error = -sin_psi * position_error_n +  cos_psi * position_error_e;
+
+  /*
+   * Convert NED-z into positive height.
+   */
+  const float current_height = -position->z;
+
+  /*
+   * Signed vertical error:
+   *
+   *   positive -> aircraft is too high
+   *   negative -> aircraft is too low
+   */
+  visual_servoing.settle_vertical_position_error = current_height - visual_servoing.settle_ref_height;
 
   const bool forward_ok = fabsf(visual_servoing.settle_forward_velocity_filtered) <= visual_servoing.settle_fwd_speed_max;
 
   const bool right_ok = fabsf(visual_servoing.settle_right_velocity_filtered) <= visual_servoing.settle_right_speed_max;
 
+  const bool raw_right_ok = fabsf(visual_servoing.settle_right_velocity) <= visual_servoing.settle_raw_right_speed_max;
+
   const bool vertical_ok = fabsf(visual_servoing.settle_vertical_velocity_filtered) <= visual_servoing.settle_vertical_speed_max;
 
-  visual_servoing.settle_condition = forward_ok && right_ok && vertical_ok;
+  const bool horizontal_position_ok = visual_servoing.settle_horizontal_position_error <= visual_servoing.settle_horizontal_pos_max;
+
+  const bool right_position_ok = fabsf(visual_servoing.settle_right_position_error) <= visual_servoing.settle_right_pos_max;
+
+  const bool vertical_position_ok = fabsf(visual_servoing.settle_vertical_position_error) <= visual_servoing.settle_vertical_pos_max;
+
+  visual_servoing.settle_velocity_ok = forward_ok && right_ok && raw_right_ok && vertical_ok;
+
+  visual_servoing.settle_horizontal_position_ok = horizontal_position_ok;
+
+  visual_servoing.settle_right_position_ok = right_position_ok;
+
+  visual_servoing.settle_vertical_position_ok = vertical_position_ok;
+
+  visual_servoing.settle_position_ok = horizontal_position_ok && right_position_ok && vertical_position_ok;
+
+  visual_servoing.settle_condition = visual_servoing.settle_velocity_ok && visual_servoing.settle_position_ok;
+
 
   /*
-   * Any single threshold violation breaks the uninterrupted
-   * settled interval and resets the dwell timer.
+   * ============================================================
+   * Independent lateral roll-trim condition
+   * ============================================================
+   *
+   * The roll-trim estimator depends only on lateral equilibrium:
+   *
+   *   filtered body-right velocity
+   *   raw body-right velocity
+   *   body-right position error
+   *
+   * Forward or vertical gate failures do NOT reset the roll-trim
+   * averaging interval.
+   *
+   * A lateral failure DOES reset the roll-trim average.
    */
-  if (!visual_servoing.settle_condition) {
-    visual_servoing.settle_condition_start_us = 0U;
 
-    visual_servoing.settle_elapsed = 0.0f;
+  const bool roll_trim_condition = right_ok && raw_right_ok && right_position_ok;
 
-    visual_servoing.settle_ready = false;
-
-    return;
+  /* Roll estimator depends ONLY on lateral equilibrium. */
+  if (roll_trim_condition) 
+  {
+      visual_servoing_update_roll_trim_average(now_us);
+  } else {
+      visual_servoing_reset_roll_trim_average();
   }
 
-  /*
-   * First observer cycle of a new uninterrupted settled interval.
-   */
-  if (
-      visual_servoing.settle_condition_start_us == 0U
-  ) {
-    visual_servoing.settle_condition_start_us = now_us;
-
-    visual_servoing.settle_elapsed = 0.0f;
-
-    return;
+  /* Full activation gate remains three-axis. */
+  if (!visual_servoing.settle_condition) 
+  {
+      visual_servoing.settle_condition_start_us = 0U;
+      visual_servoing.settle_elapsed = 0.0f;
+      visual_servoing.settle_ready = false;
+      return;
   }
 
-  /*
-   * Unsigned subtraction remains correct through normal uint32
-   * timestamp wraparound.
-   */
-  visual_servoing.settle_elapsed = 1.0e-6f * (float)(now_us - visual_servoing.settle_condition_start_us);
-
-  if (visual_servoing.settle_elapsed < visual_servoing.settle_dwell_time) {
-    return;
+  /* Full gate only needs its ordinary 0.30 s dwell. */
+  if (visual_servoing.settle_condition_start_us == 0U) 
+  {
+      visual_servoing.settle_condition_start_us = now_us;
+      visual_servoing.settle_elapsed = 0.0f;
+      return;
   }
 
-  /*
-   * The aircraft has now remained continuously settled for the
-   * full dwell duration.
-   */
+  visual_servoing.settle_elapsed =
+      1.0e-6f * (float)(now_us - visual_servoing.settle_condition_start_us);
+
+  if (visual_servoing.settle_elapsed < visual_servoing.settle_dwell_time) 
+  {
+      return;
+  }
+
+  /* Both independent requirements must now be ready. */
+  if (!visual_servoing.roll_trim_average_valid) 
+  {
+      return;
+  }
+
+  /* switch to MODULE */
   visual_servoing.settle_ready = true;
 
   visual_servoing.activation_state = VS_ACTIVATION_READY;
@@ -1570,6 +2163,41 @@ void visual_servoing_observer_periodic(void)
    * determines whether OF is permitted to become control-ready.
    */
   visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
+
+  /*
+  * ==============================================================
+  * Sustained external-pose-loss monitor
+  * ==============================================================
+  */
+
+  if (visual_servoing.pose_ok) {
+
+    /*
+    * Pose recovered. A short dropout should not remain latched.
+    */
+    visual_servoing.pose_loss_start_us = 0U;
+    visual_servoing.pose_loss_elapsed = 0.0f;
+    visual_servoing.pose_loss_too_long = false;
+
+  } else {
+
+    if (visual_servoing.pose_loss_start_us == 0U) {
+
+      /*
+      * First unhealthy observer cycle.
+      */
+      visual_servoing.pose_loss_start_us = now_us;
+      visual_servoing.pose_loss_elapsed = 0.0f;
+
+    } else {
+
+      visual_servoing.pose_loss_elapsed = 1.0e-6f * (float)(now_us - visual_servoing.pose_loss_start_us);
+    }
+
+    visual_servoing.pose_loss_too_long =
+      visual_servoing.pose_loss_elapsed >=
+      VS_POSE_LOSS_ABORT_TIME;
+  }
 
   /*
   * Do not erase the visual estimate merely because external pose
@@ -2370,6 +2998,11 @@ float reset_switch_time_end(float switchTimeEnd){
   }
 
   return switchTimeEnd;
+}
+
+bool visual_servoing_pose_loss_too_long(void)
+{
+  return visual_servoing.pose_loss_too_long;
 }
 
 ////////////////////////////////////////////////////////////////////

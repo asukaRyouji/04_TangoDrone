@@ -130,30 +130,47 @@
         value="0.025"/>
 
       <define
+        name="VS_SETTLE_RAW_RIGHT_SPEED_MAX"
+        value="0.020"/>
+
+
+      <define
         name="VS_SETTLE_VERTICAL_SPEED_MAX"
-        value="0.040"/>
+        value="0.030"/>
 
       <define
         name="VS_SETTLE_DWELL_TIME"
         value="0.3"/>
 
+      <define
+        name="VS_SETTLE_HORIZONTAL_POS_MAX"
+        value="0.050"/>
+
+      <define
+        name="VS_SETTLE_RIGHT_POS_MAX"
+        value="0.020"/>
+        
+      <define
+        name="VS_SETTLE_VERTICAL_POS_MAX"
+        value="0.050"/>
+
       <!--
         Forward position PID controller.
       -->
       <define name="VS_FWD_KP"
-              value="0.50"/>
+              value="0.80"/>
 
       <define name="VS_FWD_KD"
-              value="1.30"/>
+              value="2.00"/>
 
       <define name="VS_FWD_KI"
-              value="0.00"/>
+              value="0.03"/>
 
       <define name="VS_FIXED_PITCH_TRIM_DEG"
               value="-1.95"/>
 
       <define name="VS_FWD_I_MAX_ACCEL"
-              value="0.20"/>
+              value="0.08"/>
 
       <define name="VS_FWD_MAX_ACCEL"
               value="0.40"/>
@@ -178,7 +195,7 @@
               value="0.30"/>
 
       <define name="VS_LAT_FALLBACK_KD"
-              value="0.80"/>
+              value="1.20"/>
 
       <define name="VS_ACCEL_SLEW"
               value="1.00"/>
@@ -416,7 +433,7 @@
   </section>
 
   <section name="GUIDANCE_V" prefix="GUIDANCE_V_">
-    <define name="HOVER_KP" value="283"/>
+    <define name="HOVER_KP" value="360"/>
     <define name="HOVER_KD" value="82"/>
     <define name="HOVER_KI" value="20"/>
     <define name="NOMINAL_HOVER_THROTTLE" value="0.676"/>

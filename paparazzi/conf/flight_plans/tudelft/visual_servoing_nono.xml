@@ -41,26 +41,8 @@ inline void requestVisualServo(void)
     <waypoint name="2" x="-0.2" y="0.0" height="1."/>
     <waypoint name="3" x="0.5" y="1.0" height="1.5"/>
     <waypoint name="4" x="-0.5" y="0.0" height="1."/>
-    <waypoint name="5" x="2.0" y="-1.0" height="1.5"/>
-    <waypoint name="6" x="-2.0" y="-2.0" height="0.5"/>
-    <waypoint name="7" x="2.0" y="-3.0" height="1.5"/>
-    <waypoint name="8" x="0.0" y="-4.0" height="1.0"/>
-    <waypoint name="9" x="0.0" y="-5.0" height="1."/>
-    <waypoint name="11" x="1.9" y="1.0" height="1."/>
-    <waypoint name="12" x="1.9" y="2.0" height="1."/>
-    <waypoint name="13" x="2.9" y="2.0" height="1."/>
-    <waypoint name="14" x="2.9" y="1.0" height="1."/>
-    <waypoint name="15" x="-1.0" y="0.0" height="1."/>
-    <waypoint name="16" x="-1.5" y="0.0" height="1."/>
-    <waypoint name="17" x="-2.0" y="0.0" height="1."/>
-    <waypoint name="18" x="-1.0" y="-1.0" height="1."/>
-    <waypoint name="19" x="-1.5" y="-1.5" height="1."/>
-    <waypoint name="20" x="-2.0" y="-2.0" height="1."/>
-    <waypoint name="21" x="1.0" y="-1.0" height="1."/>
-    <waypoint name="22" x="1.5" y="-1.5" height="1."/>
-    <waypoint name="23" x="2.0" y="-2.0" height="1."/>
-    <waypoint name="CLIMB" x="1.9" y="1.0"/>
-    <waypoint name="STDBY" x="1.9" y="1.0" height="1."/>
+    <waypoint name="CLIMB" x="-0.2" y="0.0"/>
+    <waypoint name="STDBY" x="-0.2" y="0.0" height="1."/>
     <waypoint name="CSSTART" x="3.0" y="-0.968"/>
     <waypoint name="CSEND" x="0.3" y="3.68"/>
     <waypoint name="TD" x="0.8" y="-1.7"/>
@@ -143,14 +125,6 @@ inline void requestVisualServo(void)
           strip_icon="lookfore.png">
 
       <!--
-        Abort the request if external pose becomes unavailable before
-        activation.
-      -->
-      <exception
-        cond="!ins_ext_pose_is_fresh()"
-        deroute="Standby"/>
-
-      <!--
         Once the observer has automatically selected MODULE, enter the
         separate timed active block.
       -->
@@ -158,11 +132,7 @@ inline void requestVisualServo(void)
         cond="visual_servoing_is_active()"
         deroute="VS active 15 s"/>
 
-      <!--
-        Ensure ordinary NAV owns horizontal control at the beginning
-        of the waiting period.
-      -->
-      <call_once fun="setNav()"/>
+      <call_once fun="NavSetWaypointHere(WP_STDBY)"/>
 
       <!-- Arm the settle gate; this does not switch the mode. -->
       <call_once fun="requestVisualServo()"/>
@@ -171,22 +141,24 @@ inline void requestVisualServo(void)
         Standard NAV continues holding STDBY until the observer reports
         readiness and selects AP_MODE_MODULE.
       -->
-      <stay wp="STDBY"/>
+      <stay wp="2"/>
 
     </block>
 
     <block name="VS active 15 s">
 
+      <!--
+        Abort only after a sustained localization failure.
+        Brief OptiTrack/fusion timing gaps are handled internally by
+        the module and do not terminate the experiment.
+      -->
       <exception
-        cond="!ins_ext_pose_is_fresh()"
+        cond="visual_servoing_pose_loss_too_long()"
         deroute="Standby"/>
 
       <while cond="LessThan(NavBlockTime(), 15.0)"/>
 
-      <!--
-        Make the aircraft's current horizontal position the new NAV
-        holding point before returning control to NAV.
-      -->
+      <!-- Capture current position before handing back to NAV. -->
       <call_once fun="NavSetWaypointHere(WP_STDBY)"/>
 
       <call_once fun="setNav()"/>

@@ -23,7 +23,7 @@
       <define name="THETA_OFFSET" value="0.01" description="offset for theta"/>
       <define name="CC_THRESHOLD" value="5000" description="Threshold of orange pixels for manual switching to new set-point"/>
       <define name="NEW_SET_POINT" value="0.3" description="New divergence set-point when switching is set to manual"/>
-            <!--
+      <!--
         ==========================================================
         Flight mode and legacy experiment selection
         ==========================================================
@@ -63,17 +63,17 @@
 
       <define
         name="FWD_KP"
-        value="0.50"
+        value="0.80"
         description="Forward position proportional gain"/>
 
       <define
         name="FWD_KD"
-        value="1.30"
+        value="2.00"
         description="Forward velocity damping gain"/>
 
       <define
         name="FWD_KI"
-        value="0.00"
+        value="0.03"
         description="Forward position integral gain"/>
 
       <define
@@ -83,7 +83,7 @@
 
       <define
         name="FWD_I_MAX_ACCEL"
-        value="0.20"
+        value="0.08"
         description="Maximum forward integral acceleration contribution"/>
 
       <define
@@ -179,9 +179,24 @@
         description="Maximum absolute rightward speed before visual-servo activation"/>
 
       <define
+        name="SETTLE_RAW_RIGHT_SPEED_MAX"
+        value="0.020"
+        description="Maximum absolute rightward speed before visual-servo activation"/>
+
+      <define
         name="SETTLE_VERTICAL_SPEED_MAX"
-        value="0.040"
+        value="0.030"
         description="Maximum absolute vertical speed before visual-servo activation"/>
+
+      <define
+        name="SETTLE_HORIZONTAL_POS_MAX"
+        value="0.050"
+        description="Maximum horizontal distance from the captured NAV target before visual-servo activation"/>
+
+      <define
+        name="SETTLE_VERTICAL_POS_MAX"
+        value="0.050"
+        description="Maximum absolute height error before visual-servo activation"/>
 
       <define
         name="SETTLE_DWELL_TIME"
