@@ -37,6 +37,7 @@
 #include "state.h"
 #include "generated/airframe.h"
 #include "modules/visual_servoing/visual_servoing.h"
+#include "modules/computer_vision/cv_detect_color_object.h"
 
 // For optitrack multi-object position logging by Chenyao
 #include "modules/mission/moving_setup_logger_optitrack.h"
@@ -69,8 +70,28 @@ static uint32_t logger_max_write_usec = 0;
 
 static char logger_file_buffer[64 * 1024];
 
-static void logger_file_write_vs_activation_header(
-    FILE *file)
+static void logger_file_write_camera_fps_header(FILE *file)
+{
+  fprintf(
+    file,
+    "cod_callback_count,"
+    "cod_exec_time_us,"
+    "cod_exec_time_max_us,"
+  );
+}
+
+static void logger_file_write_camera_fps_row(FILE *file)
+{
+  fprintf(
+    file,
+    "%u,%u,%u,",
+    (unsigned int)cod_callback_count,
+    (unsigned int)cod_exec_time_us,
+    (unsigned int)cod_exec_time_max_us
+  );
+}
+
+static void logger_file_write_vs_activation_header(FILE *file)
 {
   fprintf(
     file,
@@ -101,8 +122,7 @@ static void logger_file_write_vs_activation_header(
   );
 }
 
-static void logger_file_write_vs_activation_row(
-    FILE *file)
+static void logger_file_write_vs_activation_row(FILE *file)
 {
   fprintf(
     file,
@@ -412,8 +432,7 @@ static void logger_file_write_visual_row(FILE *file)
  * Keep these fields in their own paired header/row functions so
  * the existing large visual-servo CSV block remains untouched.
  */
-static void logger_file_write_forward_pid_header(
-    FILE *file)
+static void logger_file_write_forward_pid_header(FILE *file)
 {
   fprintf(
     file,
@@ -429,8 +448,7 @@ static void logger_file_write_forward_pid_header(
   );
 }
 
-static void logger_file_write_forward_pid_row(
-    FILE *file)
+static void logger_file_write_forward_pid_row(FILE *file)
 {
   fprintf(
     file,
@@ -527,6 +545,7 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "acc_x,acc_y,acc_z,");
   fprintf(file, "att_phi,att_theta,att_psi,");
 
+  logger_file_write_camera_fps_header(file);
   logger_file_write_vs_activation_header(file);
   logger_file_write_visual_header(file);
   logger_file_write_forward_pid_header(file);
@@ -780,6 +799,7 @@ static void logger_file_write_row(FILE *file) {
   fprintf(file, "%f,%f,%f,", acc->x, acc->y, acc->z);
   fprintf(file, "%f,%f,%f,", att->phi, att->theta, att->psi);
 
+  logger_file_write_camera_fps_row(file);
   logger_file_write_vs_activation_row(file);
   logger_file_write_visual_row(file);
   logger_file_write_forward_pid_row(file);

@@ -38,7 +38,7 @@
 #endif
 
 #ifndef VS_NOM_THROTTLE
-#define VS_NOM_THROTTLE 0.676
+#define VS_NOM_THROTTLE 0.666
 #endif
 
 #ifndef VS_SET_POINT
@@ -198,7 +198,7 @@
  * dwell.
  */
 #ifndef VS_ROLL_TRIM_AVG_TIME
-#define VS_ROLL_TRIM_AVG_TIME 0.50f
+#define VS_ROLL_TRIM_AVG_TIME 0.30f
 #endif
 
 

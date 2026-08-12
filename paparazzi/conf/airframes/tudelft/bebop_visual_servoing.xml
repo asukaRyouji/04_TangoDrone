@@ -75,15 +75,15 @@
     <!--module name="bebop_ae_awb">
       <define name="CV_AE_AWB_VERBOSE" value="0" />
     </module-->
-    <module name="video_capture">
+    <!-- module name="video_capture">
       <define name="VIDEO_CAPTURE_CAMERA" value="front_camera"/>
-      <!-- <define name="VIDEO_CAPTURE_FPS" value="10"/> -->
-    </module>
+      <define name="VIDEO_CAPTURE_FPS" value="10"/>
+    </module -->
     <module name="cv_detect_color_object">
       <!-- <define name="OBJECT_DETECTOR_VERBOSE" value="TRUE"/> -->
       <define name="COLOR_OBJECT_DETECTOR_CAMERA1" value="front_camera"/>
-      <define name="COLOR_OBJECT_DETECTOR_FPS1" value="30"/>
-      <define name="COLOR_OBJECT_DETECTOR_DRAW1" value="1"/>
+      <define name="COLOR_OBJECT_DETECTOR_FPS1" value="0"/>
+      <define name="COLOR_OBJECT_DETECTOR_DRAW1" value="0"/>
     
       <define name="COLOR_OBJECT_DETECTOR_CAMERA2" value="bottom_camera"/>
       <define name="COLOR_OBJECT_DETECTOR_FPS2" value="1"/>
@@ -231,11 +231,11 @@
 
     </module>
 
-    <module name="video_rtp_stream">
+    <!-- module name="video_rtp_stream">
       <define name="VIEWVIDEO_CAMERA" value="front_camera"/>
       <define name="VIEWVIDEO_DOWNSIZE_FACTOR" value="1"/>
       <define name="VIEWVIDEO_QUALITY_FACTOR" value="40"/>
-    </module>
+    </module -->
   </firmware>
 
   <commands>
@@ -436,7 +436,7 @@
     <define name="HOVER_KP" value="360"/>
     <define name="HOVER_KD" value="82"/>
     <define name="HOVER_KI" value="20"/>
-    <define name="NOMINAL_HOVER_THROTTLE" value="0.676"/>
+    <define name="NOMINAL_HOVER_THROTTLE" value="0.666"/>
     <define name="ADAPT_THROTTLE_ENABLED" value="FALSE"/>
 
     <define name="ADAPT_INITIAL_HOVER_THROTTLE" value="0.68" />

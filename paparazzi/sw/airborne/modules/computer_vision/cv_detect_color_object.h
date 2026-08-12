@@ -46,6 +46,10 @@ extern uint8_t cod_cb_max2;
 extern uint8_t cod_cr_min2;
 extern uint8_t cod_cr_max2;
 
+extern uint32_t cod_callback_count;
+extern uint32_t cod_exec_time_us;
+extern uint32_t cod_exec_time_max_us;
+
 extern bool cod_draw1;
 extern bool cod_draw2;
 

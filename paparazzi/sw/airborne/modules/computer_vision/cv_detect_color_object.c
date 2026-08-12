@@ -31,6 +31,8 @@
 #include "modules/computer_vision/lib/vision/undistortion.h"
 #include "modules/core/abi.h"
 #include "std.h"
+#include "mcu_periph/sys_time.h"
+
 #include <sys/time.h>
 
 #include <stdio.h>
@@ -48,7 +50,7 @@
 static pthread_mutex_t mutex;
 
 #ifndef COLOR_OBJECT_DETECTOR_FPS1
-#define COLOR_OBJECT_DETECTOR_FPS1 0 ///< Default FPS (zero means run at camera fps)
+#define COLOR_OBJECT_DETECTOR_FPS1 30 ///< Default FPS (zero means run at camera fps)
 #endif
 #ifndef COLOR_OBJECT_DETECTOR_FPS2
 #define COLOR_OBJECT_DETECTOR_FPS2 0 ///< Default FPS (zero means run at camera fps)
@@ -71,6 +73,10 @@ uint8_t cod_cr_max2 = 0;
 
 bool cod_draw1 = false;
 bool cod_draw2 = false;
+
+uint32_t cod_exec_time_us = 0;
+uint32_t cod_exec_time_max_us = 0;
+uint32_t cod_callback_count = 0;
 
 // define global variables
 struct color_object_t {
@@ -102,6 +108,8 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter)
   uint8_t cr_min, cr_max;
   bool draw;
 
+  const uint32_t cod_start_us = get_sys_time_usec();
+
   switch (filter){
     case 1:
       lum_min = cod_lum_min1;
@@ -132,7 +140,7 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter)
   // VERBOSE_PRINT("Color count %d: %u, threshold %u, x_c %d, y_c %d\n", camera, object_count, count_threshold, x_c, y_c);
   // VERBOSE_PRINT("centroid %d: (%d, %d) r: %4.2f a: %4.2f\n", camera, x_c, y_c,
   //       hypotf(x_c, y_c) / hypotf(img->w * 0.5, img->h * 0.5), RadOfDeg(atan2f(y_c, x_c)));
-  uint32_t time_stamp = img->ts.tv_sec + img->ts.tv_usec;
+  uint32_t time_stamp = (uint32_t)((uint64_t)img->ts.tv_sec * 1000000ULL + (uint64_t)img->ts.tv_usec);
 
   pthread_mutex_lock(&mutex);
   global_filters[filter-1].color_count = count;
@@ -142,13 +150,38 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter)
   global_filters[filter-1].ts = time_stamp;
   pthread_mutex_unlock(&mutex);
 
+  const uint32_t cod_end_us = get_sys_time_usec();
+
+  cod_exec_time_us = cod_end_us - cod_start_us;
+
+  if (cod_exec_time_us > cod_exec_time_max_us) 
+  {
+    cod_exec_time_max_us = cod_exec_time_us;
+  }
+
+  cod_callback_count++;
+
   return img;
 }
 
 struct image_t *object_detector1(struct image_t *img, uint8_t camera_id);
+
+static uint32_t cod_front_frame_count = 0U;
+
 struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attribute__((unused)))
 {
-  return object_detector(img, 1);
+    /*
+     * Front camera runs at approximately 51.2 Hz.
+     * Process exactly every second incoming frame to obtain
+     * approximately 25.6 Hz detector output.
+     */
+    cod_front_frame_count++;
+
+    if ((cod_front_frame_count & 1U) == 0U) {
+        return img;
+    }
+
+    return object_detector(img, 1);
 }
 
 // struct image_t *object_detector2(struct image_t *img, uint8_t camera_id);
@@ -161,6 +194,7 @@ void color_object_detector_init(void)
 {
   memset(global_filters, 0, 2*sizeof(struct color_object_t));
   pthread_mutex_init(&mutex, NULL);
+  cod_front_frame_count = 0U;
 #ifdef COLOR_OBJECT_DETECTOR_CAMERA1
 #ifdef COLOR_OBJECT_DETECTOR_LUM_MIN1
   cod_lum_min1 = COLOR_OBJECT_DETECTOR_LUM_MIN1;
@@ -231,55 +265,46 @@ uint32_t find_object_centroid(struct image_t *img, int32_t* p_xc, int32_t* p_yc,
   // float k = COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.Dhane_k;
 
   // Go through all the pixels
-  for (uint16_t y = 0; y < img->h; y++) {
-    for (uint16_t x = 0; x < img->w; x ++) {
-      // undistort image
-      // float x_new;
-      // float y_new;
-      // bool success = distorted_pixels_to_normalized_coords((float)x, (float)y, &x_new, &y_new, k, K);
-      // // Check if the color is inside the specified values
-      // x = (uint16_t)x_new;
-      // y = (uint16_t)y_new;
-      uint8_t *yp, *up, *vp;
-      if (x % 2 == 0) {
-        // Even x
-        up = &buffer[y * 2 * img->w + 2 * x];      // U
-        yp = &buffer[y * 2 * img->w + 2 * x + 1];  // Y1
-        vp = &buffer[y * 2 * img->w + 2 * x + 2];  // V
-        //yp = &buffer[y * 2 * img->w + 2 * x + 3]; // Y2
-      } else {
-        // Uneven x
-        up = &buffer[y * 2 * img->w + 2 * x - 2];  // U
-        //yp = &buffer[y * 2 * img->w + 2 * x - 1]; // Y1
-        vp = &buffer[y * 2 * img->w + 2 * x];      // V
-        yp = &buffer[y * 2 * img->w + 2 * x + 1];  // Y2
-      }
-      if ( (*yp >= lum_min) && (*yp <= lum_max) &&
-           (*up >= cb_min ) && (*up <= cb_max ) &&
-           (*vp >= cr_min ) && (*vp <= cr_max )) {
-        cnt ++;
+  for (uint16_t y = 0; y < img->h; y += 2) {
+    for (uint16_t x = 0; x < img->w; x += 2) {
+
+      const uint32_t offset = y * 2U * img->w + 2U * x;
+
+      uint8_t *up = &buffer[offset];
+      uint8_t *yp = &buffer[offset + 1U];
+      uint8_t *vp = &buffer[offset + 2U];
+
+      if ((*yp >= lum_min) && (*yp <= lum_max) && (*up >= cb_min)  && (*up <= cb_max) && (*vp >= cr_min)  && (*vp <= cr_max)) 
+      {
+        cnt++;
         tot_x += x;
         tot_y += y;
-        if (draw){
-          *yp = 240;  // make brighter in image
+
+        if (draw) {
+          *yp = 240;
         }
       }
     }
   }
+
   if (cnt > 0) {
-    int size_crosshair = 10;
-    uint8_t blue_color[4] = {0, 128, 0, 128};
-    uint32_t p_xc_norm = (uint32_t)roundf(tot_x / ((float) cnt));
-    uint32_t p_yc_norm = (uint32_t)roundf(tot_y / ((float) cnt));
+    uint32_t p_xc_norm = (uint32_t)roundf(tot_x / ((float)cnt));
 
-    // struct FloatEulers *attitude = stateGetNedToBodyEulers_f();
-    // uint32_t xc_derotated = (uint32_t)roundf(p_xc_norm + 300 * tanf(attitude->theta)); // COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.focal_x
-    // printf("focal_x: %f \n", img->eulers.theta); 
+    uint32_t p_yc_norm = (uint32_t)roundf(tot_y / ((float)cnt));
 
-    struct point_t loc = { .x = p_xc_norm, .y = p_yc_norm };
-    image_draw_crosshair(img, &loc, blue_color, size_crosshair);
-    *p_xc = (int32_t)roundf(tot_x / ((float) cnt) - img->w * 0.5f);
-    *p_yc = (int32_t)roundf(img->h * 0.5f - tot_y / ((float) cnt));
+    if (draw) 
+    {
+      const int size_crosshair = 10;
+      uint8_t blue_color[4] = {0, 128, 0, 128};
+
+      struct point_t loc = {.x = p_xc_norm, .y = p_yc_norm};
+
+      image_draw_crosshair(img, &loc, blue_color, size_crosshair);
+    }
+
+    *p_xc = (int32_t)roundf(tot_x / ((float)cnt) - img->w * 0.5f);
+
+    *p_yc = (int32_t)roundf(img->h * 0.5f - tot_y / ((float)cnt));
   } else {
     *p_xc = 0;
     *p_yc = 0;
@@ -290,19 +315,36 @@ uint32_t find_object_centroid(struct image_t *img, int32_t* p_xc, int32_t* p_yc,
 
 void color_object_detector_periodic(void)
 {
-  static struct color_object_t local_filters[2];
+  struct color_object_t sample;
+  bool have_new_sample = false;
+
   pthread_mutex_lock(&mutex);
-  memcpy(local_filters, global_filters, 2*sizeof(struct color_object_t));
+
+  if (global_filters[0].updated) 
+  {
+    sample = global_filters[0];
+
+    /*
+     * Consume this detector result exactly once.
+     */
+    global_filters[0].updated = false;
+
+    have_new_sample = true;
+  }
+
   pthread_mutex_unlock(&mutex);
 
-  if(local_filters[0].updated){
-    AbiSendMsgVISUAL_DETECTION(COLOR_OBJECT_DETECTION1_ID, local_filters[0].ts, local_filters[0].x_c, local_filters[0].y_c,
-        0, 0, local_filters[0].color_count, 0);
-    local_filters[0].updated = false;
+  if (have_new_sample) 
+  {
+    AbiSendMsgVISUAL_DETECTION(
+      COLOR_OBJECT_DETECTION1_ID,
+      sample.ts,
+      sample.x_c,
+      sample.y_c,
+      0,
+      0,
+      sample.color_count,
+      0
+    );
   }
-  // if(local_filters[1].updated){
-  //   AbiSendMsgVISUAL_DETECTION(COLOR_OBJECT_DETECTION2_ID, local_filters[1].ts, local_filters[1].x_c, local_filters[1].y_c,
-  //       0, 0, local_filters[1].color_count, 1);
-  //   local_filters[1].updated = false;
-  // }
 }
