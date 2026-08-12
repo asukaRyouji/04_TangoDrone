@@ -504,7 +504,7 @@ static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32
    * microsecond part of the current second and therefore wraps at
    * approximately 1,000,000.
    */
-  visual_servoing.vision_stamp_us = get_sys_time_usec();
+  visual_servoing.vision_stamp_us = stamp;
 
   visual_servoing.color_count = (float)quality;
 

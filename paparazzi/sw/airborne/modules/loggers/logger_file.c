@@ -77,6 +77,13 @@ static void logger_file_write_camera_fps_header(FILE *file)
     "cod_callback_count,"
     "cod_exec_time_us,"
     "cod_exec_time_max_us,"
+    "cod_input_count,"
+    "cod_accept_count,"
+    "cod_reject_count,"
+    "cod_init_count,"
+    "cod_input_dt_us,"
+    "cod_gate_dt_us,"
+    "cod_backward_ts_count,"
   );
 }
 
@@ -84,10 +91,17 @@ static void logger_file_write_camera_fps_row(FILE *file)
 {
   fprintf(
     file,
-    "%u,%u,%u,",
+    "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,",
     (unsigned int)cod_callback_count,
     (unsigned int)cod_exec_time_us,
-    (unsigned int)cod_exec_time_max_us
+    (unsigned int)cod_exec_time_max_us,
+    (unsigned int)cod_input_count,
+    (unsigned int)cod_accept_count,
+    (unsigned int)cod_reject_count,
+    (unsigned int)cod_init_count,
+    (unsigned int)cod_input_dt_us,
+    (unsigned int)cod_gate_dt_us,
+    (unsigned int)cod_backward_ts_count
   );
 }
 

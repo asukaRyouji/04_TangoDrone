@@ -50,6 +50,15 @@ extern uint32_t cod_callback_count;
 extern uint32_t cod_exec_time_us;
 extern uint32_t cod_exec_time_max_us;
 
+extern uint32_t cod_input_count;
+extern uint32_t cod_accept_count;
+extern uint32_t cod_reject_count;
+extern uint32_t cod_init_count;
+
+extern uint32_t cod_input_dt_us;
+extern uint32_t cod_gate_dt_us;
+extern uint32_t cod_backward_ts_count;
+
 extern bool cod_draw1;
 extern bool cod_draw2;
 

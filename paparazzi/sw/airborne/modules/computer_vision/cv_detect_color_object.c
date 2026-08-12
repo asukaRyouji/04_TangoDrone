@@ -78,6 +78,21 @@ uint32_t cod_exec_time_us = 0;
 uint32_t cod_exec_time_max_us = 0;
 uint32_t cod_callback_count = 0;
 
+uint32_t cod_input_count = 0U;
+uint32_t cod_accept_count = 0U;
+uint32_t cod_reject_count = 0U;
+uint32_t cod_init_count = 0U;
+
+uint32_t cod_input_dt_us = 0U;
+uint32_t cod_gate_dt_us = 0U;
+uint32_t cod_backward_ts_count = 0U;
+
+static uint32_t cod_last_input_ts_us = 0U;
+
+#define COD_MIN_FRAME_INTERVAL_US 33000U
+
+static uint32_t cod_last_processed_frame_ts_us = 0U;
+
 // define global variables
 struct color_object_t {
   int32_t x_c;
@@ -101,7 +116,7 @@ uint32_t find_object_centroid(struct image_t *img, int32_t* p_xc, int32_t* p_yc,
  * @param filter - which detection filter to process
  * @return img
  */
-static struct image_t *object_detector(struct image_t *img, uint8_t filter)
+static struct image_t *object_detector(struct image_t *img, uint8_t filter, uint32_t time_stamp)
 {
   uint8_t lum_min, lum_max;
   uint8_t cb_min, cb_max;
@@ -140,7 +155,6 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter)
   // VERBOSE_PRINT("Color count %d: %u, threshold %u, x_c %d, y_c %d\n", camera, object_count, count_threshold, x_c, y_c);
   // VERBOSE_PRINT("centroid %d: (%d, %d) r: %4.2f a: %4.2f\n", camera, x_c, y_c,
   //       hypotf(x_c, y_c) / hypotf(img->w * 0.5, img->h * 0.5), RadOfDeg(atan2f(y_c, x_c)));
-  uint32_t time_stamp = (uint32_t)((uint64_t)img->ts.tv_sec * 1000000ULL + (uint64_t)img->ts.tv_usec);
 
   pthread_mutex_lock(&mutex);
   global_filters[filter-1].color_count = count;
@@ -166,22 +180,51 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter)
 
 struct image_t *object_detector1(struct image_t *img, uint8_t camera_id);
 
-static uint32_t cod_front_frame_count = 0U;
-
 struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attribute__((unused)))
 {
-    /*
-     * Front camera runs at approximately 51.2 Hz.
-     * Process exactly every second incoming frame to obtain
-     * approximately 25.6 Hz detector output.
-     */
-    cod_front_frame_count++;
+    const uint32_t img_ts_us = (uint32_t)((uint64_t)img->ts.tv_sec * 1000000ULL + (uint64_t)img->ts.tv_usec);
 
-    if ((cod_front_frame_count & 1U) == 0U) {
+    bool process_this_frame = false;
+
+    pthread_mutex_lock(&mutex);
+
+    cod_input_count++;
+
+    if (cod_last_input_ts_us != 0U) {
+        if (img_ts_us < cod_last_input_ts_us) {
+            cod_backward_ts_count++;
+        }
+
+        cod_input_dt_us = (uint32_t)(img_ts_us - cod_last_input_ts_us);
+    }
+
+    cod_last_input_ts_us = img_ts_us;
+
+    if (cod_last_processed_frame_ts_us == 0U) {
+        cod_gate_dt_us = 0U;
+
+        cod_last_processed_frame_ts_us = img_ts_us;
+        cod_accept_count++;
+        process_this_frame = true;
+    } else {
+        cod_gate_dt_us = (uint32_t)(img_ts_us - cod_last_processed_frame_ts_us);
+
+        if (cod_gate_dt_us >= COD_MIN_FRAME_INTERVAL_US) {
+            cod_last_processed_frame_ts_us = img_ts_us;
+            cod_accept_count++;
+            process_this_frame = true;
+        } else {
+            cod_reject_count++;
+        }
+    }
+
+    pthread_mutex_unlock(&mutex);
+
+    if (!process_this_frame) {
         return img;
     }
 
-    return object_detector(img, 1);
+    return object_detector(img, 1, img_ts_us);
 }
 
 // struct image_t *object_detector2(struct image_t *img, uint8_t camera_id);
@@ -192,9 +235,26 @@ struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attrib
 
 void color_object_detector_init(void)
 {
-  memset(global_filters, 0, 2*sizeof(struct color_object_t));
+  memset(global_filters, 0, 2 * sizeof(struct color_object_t));
   pthread_mutex_init(&mutex, NULL);
-  cod_front_frame_count = 0U;
+
+  cod_input_count = 0U;
+  cod_accept_count = 0U;
+  cod_reject_count = 0U;
+
+  cod_input_dt_us = 0U;
+  cod_gate_dt_us = 0U;
+  cod_backward_ts_count = 0U;
+
+  cod_last_input_ts_us = 0U;
+  cod_last_processed_frame_ts_us = 0U;
+
+  /*
+  * Do not reset this one.
+  * If init somehow runs twice, we want to see 2.
+  */
+  cod_init_count++;
+
 #ifdef COLOR_OBJECT_DETECTOR_CAMERA1
 #ifdef COLOR_OBJECT_DETECTOR_LUM_MIN1
   cod_lum_min1 = COLOR_OBJECT_DETECTOR_LUM_MIN1;
@@ -334,17 +394,17 @@ void color_object_detector_periodic(void)
 
   pthread_mutex_unlock(&mutex);
 
-  if (have_new_sample) 
+  if (have_new_sample)
   {
-    AbiSendMsgVISUAL_DETECTION(
-      COLOR_OBJECT_DETECTION1_ID,
-      sample.ts,
-      sample.x_c,
-      sample.y_c,
-      0,
-      0,
-      sample.color_count,
-      0
-    );
+      AbiSendMsgVISUAL_DETECTION(
+          COLOR_OBJECT_DETECTION1_ID,
+          sample.ts,
+          sample.x_c,
+          sample.y_c,
+          0,
+          0,
+          sample.color_count,
+          0
+      );
   }
 }
