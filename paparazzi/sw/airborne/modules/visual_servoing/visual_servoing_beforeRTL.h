@@ -26,12 +26,11 @@
  *
  * SETTLE:
  *   Standard horizontal NAV control remains active while the
- *   aircraft position/velocity gates, roll-trim averaging and
- *   two-second KF3 visual pre-roll run in parallel.
+ *   aircraft velocities are checked.
  *
  * READY:
- *   Mechanical settling, roll-trim averaging and KF3 pre-roll are
- *   all ready. A switch to AP_MODE_MODULE is being issued.
+ *   All velocity conditions have remained valid for the required
+ *   dwell time. A switch to AP_MODE_MODULE is being issued.
  *
  * ACTIVE:
  *   GUIDANCE_H_MODE_MODULE owns the horizontal controller.
@@ -109,82 +108,25 @@ struct VisualServoing {
   float prev_box_centroid_y;
   float prev_of_y;
   float prev_raw_of_y;
-  /*
-   * ============================================================
-   * Three-state centroid -> optic-flow Kalman filter
-   * ============================================================
-   *
-   * State:
-   *
-   *   x = [ centroid_y ; OF_y ; OFD_y ]
-   *
-   * Measurement:
-   *
-   *   z = centroid_y
-   *
-   * raw_of_y/raw_of_y_d above are retained for diagnostics only.
-   * They are NOT measurements used by KF3.
-   */
-
-  /* Posterior state estimates. */
-  float kf_centroid;       // centroid estimate [px]
-  float kf_x1;             // estimated OF [px/s]
-  float kf_x2;             // estimated OFD / image acceleration [px/s^2]
-
-  /* One-step state predictions. */
-  float kf_centroid_pred;  // predicted centroid [px]
-  float kf_x1_pred;        // predicted OF [px/s]
-  float kf_x2_pred;        // predicted OFD [px/s^2]
-
-  /* True scalar KF innovation: centroid measurement - predicted centroid. */
-  float kf_innov_centroid;
-
-  /*
-   * Posterior covariance matrix P for state ordering
-   * [centroid, OF, OFD].
-   *
-   * Existing p11/p12/p21/p22 names are preserved for compatibility
-   * with the current logger and correspond to the OF/OFD sub-block.
-   */
-  float kf_p00;
-  float kf_p01;
-  float kf_p02;
-  float kf_p10;
+  // Kalman filter
+  float kf_x1;      // estimated OF
+  float kf_x2;      // estimated OFD
+  // One-step prediction
+  float kf_x1_pred;
+  float kf_x2_pred;
+  // Covariance matrix P
   float kf_p11;
   float kf_p12;
-  float kf_p20;
   float kf_p21;
   float kf_p22;
-
-  /*
-   * Process-noise diagnostics.
-   * q11 = Q(OF,OF), q22 = Q(OFD,OFD) for the current dt.
-   */
+  // Process noise Q
   float kf_q11;
   float kf_q22;
-
-  /*
-   * Measurement-noise diagnostics.
-   * kf_r11 is retained for logger compatibility and now stores
-   * centroid measurement variance [px^2]. kf_r22 is unused (0).
-   */
-  float kf_r11;
-  float kf_r22;
-
-  /* Estimator initialization flag. */
+  // Measurement noise R
+  float kf_r11;     // OF measurement variance
+  float kf_r22;     // OFD measurement variance
+  // Init flag
   bool kf_initialized;
-
-  /*
-   * VS_SETTLE KF3 pre-roll diagnostics.
-   *
-   * The estimator runs in shadow mode while NAV owns the aircraft.
-   * Normal automatic MODULE entry requires 2 s of valid pre-roll
-   * (and the minimum-frame sanity guard defined in visual_servoing.c).
-   */
-  uint32_t kf_warmup_start_us;
-  uint32_t kf_warmup_valid_frames;
-  float kf_warmup_elapsed;
-  bool kf_warmup_ready;
   // Low pass 15 Hz and 5 hz
   float lp_of_b0;
   float lp_of_b1;
@@ -682,8 +624,8 @@ extern void visual_servoing_request_start(void);
 extern void visual_servoing_cancel_request(void);
 
 /*
- * Return true after all automatic entry requirements are ready:
- * the mechanical settle dwell, roll-trim average and KF3 pre-roll.
+ * Return true after the settle conditions have remained valid for
+ * the configured dwell time.
  */
 extern bool visual_servoing_is_ready(void);
 

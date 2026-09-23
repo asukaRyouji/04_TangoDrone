@@ -65,7 +65,7 @@
     <module name="ins" type="ext_pose"/>
     <!-- module name="ins" type="extended"/ --> 
     <module name="logger_file">
-      <configure name="LOGGER_FILE_FREQUENCY" value="32"/>
+      <configure name="LOGGER_FILE_FREQUENCY" value="64"/>
     </module>
     <module name="moving_setup_logger_optitrack"/>
     
@@ -180,16 +180,16 @@
         Lateral OF and fallback controller.
       -->
       <define name="VS_OL_Y_OF_GAIN"
-              value="0.00"/>
+              value="4.00"/>
 
       <define name="VS_OL_Y_YAW_GAIN"
-              value="0.00"/>
+              value="2.00"/>
 
       <define name="VS_OL_Y_OA_GAIN"
               value="0.0"/>
 
       <define name="VS_OF_SCALE"
-              value="0.005"/>
+              value="0.0044"/>
 
       <define name="VS_LAT_MAX_ACCEL"
               value="0.30"/>
@@ -217,7 +217,7 @@
               value="5"/>
 
       <define name="VS_CC_THRESHOLD"
-              value="5000"/>
+              value="35"/>
 
 
       <!--

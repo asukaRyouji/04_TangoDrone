@@ -11,7 +11,6 @@
  */
 
 #include <math.h>
-#include <stdint.h>
 #include "math/pprz_stat.h"
 #include "math/pprz_algebra_float.h"
 #include "modules/visual_servoing/visual_servoing.h"
@@ -55,11 +54,11 @@
 #endif
 
 #ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 4.0
+#define VS_OL_Y_OF_GAIN 0.0
 #endif
 
 #ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 2.0
+#define VS_OL_Y_YAW_GAIN 0.0
 #endif
 
 #ifndef VS_OL_Y_OA_GAIN
@@ -277,7 +276,7 @@
  * Preserve the scaling used in the earlier experiments.
  */
 #ifndef VS_OF_SCALE
-#define VS_OF_SCALE 0.0044f
+#define VS_OF_SCALE 0.005f
 #endif
 
 /*
@@ -326,52 +325,6 @@
 
 #ifndef VS_VISION_MIN_STREAK
 #define VS_VISION_MIN_STREAK 5
-#endif
-
-/*
- * ==============================================================
- * Three-state centroid -> optic-flow Kalman filter
- * ==============================================================
- *
- * State:
- *
- *   x = [ centroid_y ; OF_y ; OFD_y ]
- *
- * Measurement:
- *
- *   z = centroid_y
- *
- * The model is constant image acceleration with white jerk process
- * noise. These parameters are the plain-KF3 values selected from the
- * 12-flight offline comparison. No innovation clipping/gating is used.
- */
-#ifndef VS_KF3_SIGMA_C_PX
-#define VS_KF3_SIGMA_C_PX 2.0f
-#endif
-
-#ifndef VS_KF3_SIGMA_JERK_PX_S3
-#define VS_KF3_SIGMA_JERK_PX_S3 3500.0f
-#endif
-
-#ifndef VS_KF3_INITIAL_OF_STD_PX_S
-#define VS_KF3_INITIAL_OF_STD_PX_S 300.0f
-#endif
-
-#ifndef VS_KF3_INITIAL_OFD_STD_PX_S2
-#define VS_KF3_INITIAL_OFD_STD_PX_S2 1200.0f
-#endif
-
-/*
- * During VS_SETTLE, run the visual estimator in shadow mode for two
- * seconds before allowing the NAV -> MODULE handover.
- */
-#ifndef VS_KF3_WARMUP_TIME
-#define VS_KF3_WARMUP_TIME 2.0f
-#endif
-
-/* Sanity guard: two seconds at ~29.5 Hz normally gives ~59 frames. */
-#ifndef VS_KF3_WARMUP_MIN_FRAMES
-#define VS_KF3_WARMUP_MIN_FRAMES 40U
 #endif
 
 
@@ -468,10 +421,6 @@
 #define VS_SETTLE_VERTICAL_POS_MAX 0.050f
 #endif
 
-#ifndef VS_USE_OF_LATERAL_CONTROL
-#define VS_USE_OF_LATERAL_CONTROL 1
-#endif
-
 // define and initialise global variables
 float fps = 0;
 float end_time = 0;
@@ -495,22 +444,6 @@ float vs_enable_time = 0.0f;
 
 int switch_count = 0;
 float divsp_list[4] = {0.037963f, 0.105616f, 0.174661f, 0.523801f};
-
-/*
- * Internal state for the 3-state centroid/OF/OFD Kalman filter.
- *
- * Existing public/logged fields are retained for compatibility:
- *   kf_x1 / kf_x1_pred -> OF / predicted OF
- *   kf_x2 / kf_x2_pred -> OFD / predicted OFD
- *   kf_p11..p22        -> OF/OFD covariance sub-block
- *
- * The complete state/covariance is mirrored into VisualServoing
- * diagnostic fields, while this compact internal matrix is used for
- * the actual KF arithmetic.
- */
-static float kf3_centroid = 0.0f;
-static float kf3_centroid_pred = 0.0f;
-static float kf3_p[3][3] = {{0.0f}};
 
 // Setup the message for the logger
 static void send_vs_attitude(struct transport_tx *trans, struct link_device *dev)
@@ -602,13 +535,9 @@ static float divergence_step(float switch_time, float magnitude);
 
 static float reset_switch_time_end(float switch_time_end);
 
-static void visual_servoing_kf_init(float centroid_meas);
+static void visual_servoing_kf_init(float of_meas, float ofd_meas);
 
-static void visual_servoing_kf_update(float centroid_meas, float dt);
-
-static void visual_servoing_kf_warmup_reset(void);
-
-static void visual_servoing_kf_warmup_note_valid_frame(uint32_t now_us);
+static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt);
 
 /*
  * ==============================================================
@@ -733,34 +662,22 @@ void visual_servoing_module_init(void)
   visual_servoing.prev_box_centroid_y = 0;
   visual_servoing.prev_of_y = 0;
   visual_servoing.prev_raw_of_y = 0;
-  // 3-state centroid / optic-flow Kalman filter diagnostics
+  //kalman filter
   visual_servoing.kf_x1 = 0.0f;
   visual_servoing.kf_x2 = 0.0f;
   visual_servoing.kf_x1_pred = 0.0f;
   visual_servoing.kf_x2_pred = 0.0f;
 
-  visual_servoing.kf_centroid = 0.0f;
-  visual_servoing.kf_centroid_pred = 0.0f;
-  visual_servoing.kf_innov_centroid = 0.0f;
-
-  visual_servoing.kf_p11 = VS_KF3_INITIAL_OF_STD_PX_S * VS_KF3_INITIAL_OF_STD_PX_S;
+  visual_servoing.kf_p11 = 1.0f;
   visual_servoing.kf_p12 = 0.0f;
   visual_servoing.kf_p21 = 0.0f;
-  visual_servoing.kf_p22 = VS_KF3_INITIAL_OFD_STD_PX_S2 * VS_KF3_INITIAL_OFD_STD_PX_S2;
+  visual_servoing.kf_p22 = 1.0f;
 
-  visual_servoing.kf_p00 = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  visual_servoing.kf_p01 = 0.0f;
-  visual_servoing.kf_p02 = 0.0f;
-  visual_servoing.kf_p10 = 0.0f;
-  visual_servoing.kf_p20 = 0.0f;
+  visual_servoing.kf_q11 = 0.0010f;
+  visual_servoing.kf_q22 = 0.05f;
 
-  /* q11/q22 are updated each camera frame from the jerk model. */
-  visual_servoing.kf_q11 = 0.0f;
-  visual_servoing.kf_q22 = 0.0f;
-
-  /* r11 now denotes centroid measurement variance [px^2]. */
-  visual_servoing.kf_r11 = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  visual_servoing.kf_r22 = 0.0f;
+  visual_servoing.kf_r11 = 0.0050f;
+  visual_servoing.kf_r22 = 0.5000f;
 
   visual_servoing.kf_initialized = FALSE;
   visual_servoing.lp_of_b0 = 0.46515307f;
@@ -926,11 +843,6 @@ void visual_servoing_module_init(void)
   visual_servoing.vision_age = 1000.0f;
   visual_servoing.control_dt = 0.0f;
 
-  visual_servoing.kf_warmup_start_us = 0U;
-  visual_servoing.kf_warmup_valid_frames = 0U;
-  visual_servoing.kf_warmup_elapsed = 0.0f;
-  visual_servoing.kf_warmup_ready = false;
-
   /*
    * Reference-frame and controller diagnostics.
    */
@@ -1026,17 +938,32 @@ static void reset_all_vars(void)
   visual_servoing.Kp_vx = VS_OL_X_VEL_PGAIN;
   visual_servoing.mu_vx_ff = 0.0;
   visual_servoing.err_vx = 0.0;
-  /*
-   * Preserve a completed VS_SETTLE KF3 pre-roll across NAV -> MODULE.
-   * This is the onboard equivalent of the 2 s MATLAB pre-roll.
-   *
-   * If MODULE is entered manually without a valid warm estimator, the
-   * capture-reference function below will explicitly clear the estimator.
-   */
-  if (!visual_servoing.kf_warmup_ready) {
-    visual_servoing_reset_of_state();
-  }
+  visual_servoing.raw_of_y = 0;
+  visual_servoing.of_y = 0;
+  visual_servoing.raw_of_y_d = 0;
+  visual_servoing.of_y_d = 0;
+  visual_servoing.prev_box_centroid_y = 0;
+  visual_servoing.prev_of_y = 0;
+  visual_servoing.prev_raw_of_y = 0;
 
+  //kalman filter
+  visual_servoing.kf_x1 = 0.0f;
+  visual_servoing.kf_x2 = 0.0f;
+  visual_servoing.kf_x1_pred = 0.0f;
+  visual_servoing.kf_x2_pred = 0.0f;
+
+  visual_servoing.kf_p11 = 1.0f;
+  visual_servoing.kf_p12 = 0.0f;
+  visual_servoing.kf_p21 = 0.0f;
+  visual_servoing.kf_p22 = 1.0f;
+
+  visual_servoing.kf_q11 = 0.001f;
+  visual_servoing.kf_q22 = 0.05f;
+
+  visual_servoing.kf_r11 = 0.0050f;
+  visual_servoing.kf_r22 = 0.5000f;
+
+  visual_servoing.kf_initialized = FALSE;
   visual_servoing.lp_of_b0 = 0.46515307f;
   visual_servoing.lp_of_b1 = 0.93030615f;
   visual_servoing.lp_of_b2 = 0.46515307f;
@@ -1149,23 +1076,6 @@ void visual_servoing_request_start(void)
 
   visual_servoing.activation_state = VS_ACTIVATION_SETTLE;
 
-  /*
-   * Start a fresh two-second visual-estimator pre-roll.
-   *
-   * Standard NAV remains in control during this complete interval. The
-   * first new camera frame establishes a clean timing baseline; following
-   * valid frames initialize and converge KF3 in shadow mode.
-   */
-  visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
-  visual_servoing.previous_vision_stamp_us = 0U;
-  visual_servoing.last_valid_vision_rx_us = 0U;
-  visual_servoing.vision_new_frame = false;
-  visual_servoing.vision_valid = false;
-  visual_servoing.vision_dt = 0.0f;
-  visual_servoing.vision_age = 1000.0f;
-  visual_servoing_reset_of_state();
-  visual_servoing_kf_warmup_reset();
-
   visual_servoing.settle_condition = false;
 
   visual_servoing.settle_ready = false;
@@ -1205,8 +1115,6 @@ void visual_servoing_cancel_request(void)
   visual_servoing.activation_requested = false;
 
   visual_servoing.activation_state = VS_ACTIVATION_IDLE;
-
-  visual_servoing_kf_warmup_reset();
 
   visual_servoing.settle_condition = false;
 
@@ -1291,39 +1199,11 @@ static void visual_servoing_reset_of_state(void)
   visual_servoing.prev_raw_of_y = 0.0f;
   visual_servoing.prev_of_y = 0.0f;
 
-  kf3_centroid = 0.0f;
-  kf3_centroid_pred = 0.0f;
-
-  visual_servoing.kf_centroid = 0.0f;
-  visual_servoing.kf_centroid_pred = 0.0f;
-  visual_servoing.kf_innov_centroid = 0.0f;
-
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      kf3_p[i][j] = 0.0f;
-    }
-  }
-
   visual_servoing.kf_x1 = 0.0f;
   visual_servoing.kf_x2 = 0.0f;
 
   visual_servoing.kf_x1_pred = 0.0f;
   visual_servoing.kf_x2_pred = 0.0f;
-
-  visual_servoing.kf_p00 = 0.0f;
-  visual_servoing.kf_p01 = 0.0f;
-  visual_servoing.kf_p02 = 0.0f;
-  visual_servoing.kf_p10 = 0.0f;
-  visual_servoing.kf_p11 = 0.0f;
-  visual_servoing.kf_p12 = 0.0f;
-  visual_servoing.kf_p20 = 0.0f;
-  visual_servoing.kf_p21 = 0.0f;
-  visual_servoing.kf_p22 = 0.0f;
-
-  visual_servoing.kf_q11 = 0.0f;
-  visual_servoing.kf_q22 = 0.0f;
-  visual_servoing.kf_r11 = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  visual_servoing.kf_r22 = 0.0f;
 
   visual_servoing.kf_initialized = false;
 
@@ -1332,44 +1212,6 @@ static void visual_servoing_reset_of_state(void)
   visual_servoing.of_ready = false;
 
   visual_servoing.using_of_control = false;
-
-  /* Any loss of visual continuity during VS_SETTLE restarts pre-roll. */
-  visual_servoing_kf_warmup_reset();
-}
-
-static void visual_servoing_kf_warmup_reset(void)
-{
-  visual_servoing.kf_warmup_start_us = 0U;
-  visual_servoing.kf_warmup_valid_frames = 0U;
-  visual_servoing.kf_warmup_elapsed = 0.0f;
-  visual_servoing.kf_warmup_ready = false;
-}
-
-static void visual_servoing_kf_warmup_note_valid_frame(uint32_t now_us)
-{
-  /* Pre-roll is relevant only while waiting in the NAV settle state. */
-  if (visual_servoing.activation_state != VS_ACTIVATION_SETTLE &&
-      visual_servoing.activation_state != VS_ACTIVATION_READY) {
-    return;
-  }
-
-  if (visual_servoing.kf_warmup_start_us == 0U) {
-    visual_servoing.kf_warmup_start_us = now_us;
-  }
-
-  if (visual_servoing.kf_warmup_valid_frames < UINT32_MAX) {
-    visual_servoing.kf_warmup_valid_frames++;
-  }
-
-  visual_servoing.kf_warmup_elapsed =
-    1.0e-6f * (float)(now_us - visual_servoing.kf_warmup_start_us);
-
-  visual_servoing.kf_warmup_ready =
-    visual_servoing.kf_initialized &&
-    visual_servoing.vision_valid &&
-    visual_servoing.of_ready &&
-    visual_servoing.kf_warmup_elapsed >= VS_KF3_WARMUP_TIME &&
-    visual_servoing.kf_warmup_valid_frames >= VS_KF3_WARMUP_MIN_FRAMES;
 }
 
 /*
@@ -1751,30 +1593,20 @@ static void visual_servoing_capture_reference(void)
   visual_servoing.control_dt = 0.0f;
 
   /*
-   * Preserve a completed KF3 pre-roll across NAV -> MODULE.
+   * Ignore any image that arrived before module entry.
    *
-   * During normal automatic activation the observer has already run KF3
-   * for at least VS_KF3_WARMUP_TIME while NAV owned the aircraft. Keep
-   * the state, covariance, previous centroid and previous frame timestamp
-   * so the first ACTIVE frame is a normal continuation of that estimate.
-   *
-   * A manual MODULE entry that bypasses VS_SETTLE has no valid pre-roll;
-   * in that exceptional path, start the visual estimator from scratch.
+   * The first image received after entry establishes a new visual
+   * timing baseline.
    */
-  if (!visual_servoing.kf_warmup_ready ||
-      !visual_servoing.kf_initialized ||
-      !visual_servoing.have_previous_valid_target) {
+  visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
 
-    visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
-    visual_servoing.previous_vision_stamp_us = 0U;
-    visual_servoing.last_valid_vision_rx_us = 0U;
-    visual_servoing.vision_new_frame = false;
-    visual_servoing.vision_valid = false;
-    visual_servoing.vision_dt = 0.0f;
-    visual_servoing.vision_age = 1000.0f;
+  visual_servoing.previous_vision_stamp_us = 0;
+  visual_servoing.last_valid_vision_rx_us = 0;
 
-    visual_servoing_reset_of_state();
-  }
+  visual_servoing.vision_new_frame = false;
+  visual_servoing.vision_valid = false;
+  visual_servoing.vision_dt = 0.0f;
+  visual_servoing.vision_age = 1000.0f;
 
   visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
 
@@ -1813,6 +1645,8 @@ static void visual_servoing_capture_reference(void)
   visual_servoing.mu_x_target = visual_servoing.mu_x_trim;
 
   visual_servoing.mu_y_target = visual_servoing.mu_y_trim;
+
+  visual_servoing_reset_of_state();
 }
 
 static void visual_servoing_process_new_vision_sample(uint32_t now_us)
@@ -1915,14 +1749,15 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
     visual_servoing.prev_raw_of_y = 0.0f;
     visual_servoing.prev_of_y = 0.0f;
 
-    visual_servoing_kf_init(visual_servoing.box_centroid_y);
+    visual_servoing_kf_init(
+      0.0f,
+      0.0f
+    );
 
     visual_servoing.have_previous_valid_target = true;
 
     visual_servoing.vision_valid_streak = 1;
     visual_servoing.of_ready = false;
-
-    visual_servoing_kf_warmup_note_valid_frame(now_us);
 
     return;
   }
@@ -1934,9 +1769,9 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
     (visual_servoing.box_centroid_y - visual_servoing.prev_box_centroid_y) / visual_servoing.vision_dt;
 
   /*
-   * Raw OF and OF derivative are retained only as diagnostics.
-   * KF3 itself measures centroid_y directly and estimates OF/OFD as
-   * latent states, avoiding differentiated measurements in the update.
+   * OF derivative is retained for logging and the existing
+   * two-state Kalman filter, but it is not used directly by the
+   * lateral controller.
    */
   visual_servoing.raw_of_y_d =
     (visual_servoing.raw_of_y - visual_servoing.prev_raw_of_y) / visual_servoing.vision_dt;
@@ -1953,7 +1788,8 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
   }
 
   visual_servoing_kf_update(
-    visual_servoing.box_centroid_y,
+    visual_servoing.raw_of_y,
+    visual_servoing.raw_of_y_d,
     visual_servoing.vision_dt
   );
 
@@ -1976,8 +1812,6 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
    * actuated from optic flow.
    */
   visual_servoing.of_ready = visual_servoing.vision_valid_streak >= visual_servoing.vision_min_streak;
-
-  visual_servoing_kf_warmup_note_valid_frame(now_us);
 }
 
 static void visual_servoing_update_activation(uint32_t now_us)
@@ -2253,17 +2087,8 @@ static void visual_servoing_update_activation(uint32_t now_us)
       return;
   }
 
-  /*
-   * All independent entry requirements must now be ready:
-   *
-   *   1. mechanical settle dwell complete;
-   *   2. NAV-derived roll-trim average valid;
-   *   3. KF3 has accumulated a continuous two-second visual pre-roll.
-   */
-  if (!visual_servoing.roll_trim_average_valid ||
-      !visual_servoing.kf_warmup_ready ||
-      !visual_servoing.of_ready ||
-      !visual_servoing.vision_valid)
+  /* Both independent requirements must now be ready. */
+  if (!visual_servoing.roll_trim_average_valid) 
   {
       return;
   }
@@ -2754,7 +2579,7 @@ void visual_servoing_module_run(bool in_flight)
   visual_servoing.using_of_control = false;
   visual_servoing.using_lateral_fallback = false;
 
-  if (VS_USE_OF_LATERAL_CONTROL && visual_servoing.pose_ok && visual_servoing.of_ready) {
+  if (visual_servoing.pose_ok && visual_servoing.of_ready) {
     /*
      * Preserve the experimentally derived controller structure:
      *
@@ -2948,240 +2773,112 @@ void final_land_in_box(float start_time)
   #endif
 
 /**
- * Three-state centroid -> optic-flow Kalman filter.
- *
- * State:
- *
- *   x = [ centroid_y ; OF_y ; OFD_y ]
- *
- * Measurement:
- *
- *   z = centroid_y
- *
- * Dynamics over one measured camera interval dt:
- *
- *   F = [ 1  dt  0.5 dt^2 ]
- *       [ 0   1      dt    ]
- *       [ 0   0       1    ]
- *
- * White image jerk drives process uncertainty:
- *
- *   G = [ dt^3/6 ; dt^2/2 ; dt ]
- *   Q = sigma_jerk^2 * G G'
- *
- * Only centroid is measured, so H = [1 0 0]. The public kf_x1/kf_x2
- * fields retain their historical meanings as filtered OF and OFD.
+ * Kalman filter for optic flow PD reconstruction 
  */
 
-static void visual_servoing_kf_init(float centroid_meas)
+static void visual_servoing_kf_init(float of_meas, float ofd_meas)
 {
-  if (!isfinite(centroid_meas)) {
-    return;
-  }
+  visual_servoing.kf_x1 = of_meas;
+  visual_servoing.kf_x2 = ofd_meas;
 
-  kf3_centroid = centroid_meas;
-  kf3_centroid_pred = centroid_meas;
+  visual_servoing.kf_x1_pred = of_meas;
+  visual_servoing.kf_x2_pred = ofd_meas;
 
-  visual_servoing.kf_centroid = centroid_meas;
-  visual_servoing.kf_centroid_pred = centroid_meas;
-  visual_servoing.kf_innov_centroid = 0.0f;
-
-  visual_servoing.kf_x1 = 0.0f;   /* OF [px/s] */
-  visual_servoing.kf_x2 = 0.0f;   /* OFD [px/s^2] */
-  visual_servoing.kf_x1_pred = 0.0f;
-  visual_servoing.kf_x2_pred = 0.0f;
-
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      kf3_p[i][j] = 0.0f;
-    }
-  }
-
-  kf3_p[0][0] = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  kf3_p[1][1] = VS_KF3_INITIAL_OF_STD_PX_S * VS_KF3_INITIAL_OF_STD_PX_S;
-  kf3_p[2][2] = VS_KF3_INITIAL_OFD_STD_PX_S2 * VS_KF3_INITIAL_OFD_STD_PX_S2;
-
-  /* Expose the full posterior covariance for diagnostics/logging. */
-  visual_servoing.kf_p00 = kf3_p[0][0];
-  visual_servoing.kf_p01 = kf3_p[0][1];
-  visual_servoing.kf_p02 = kf3_p[0][2];
-  visual_servoing.kf_p10 = kf3_p[1][0];
-  visual_servoing.kf_p11 = kf3_p[1][1];
-  visual_servoing.kf_p12 = kf3_p[1][2];
-  visual_servoing.kf_p20 = kf3_p[2][0];
-  visual_servoing.kf_p21 = kf3_p[2][1];
-  visual_servoing.kf_p22 = kf3_p[2][2];
-
-  visual_servoing.kf_q11 = 0.0f;
-  visual_servoing.kf_q22 = 0.0f;
-  visual_servoing.kf_r11 = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  visual_servoing.kf_r22 = 0.0f;
+  visual_servoing.kf_p11 = 1.0f;
+  visual_servoing.kf_p12 = 0.0f;
+  visual_servoing.kf_p21 = 0.0f;
+  visual_servoing.kf_p22 = 1.0f;
 
   visual_servoing.kf_initialized = TRUE;
 }
 
-static void visual_servoing_kf_update(float centroid_meas, float dt)
+static void visual_servoing_kf_update(float of_meas, float ofd_meas, float dt)
 {
-  if (!visual_servoing.kf_initialized ||
-      !isfinite(centroid_meas) ||
-      !isfinite(dt) ||
-      dt < 1.0e-5f) {
+  if (dt < 1e-5f) {
     return;
   }
 
-  const float dt2 = dt * dt;
-  const float dt3 = dt2 * dt;
+  // State transition A = [1 dt; 0 1]
+  const float A11 = 1.0f;
+  const float A12 = dt;
+  const float A21 = 0.0f;
+  const float A22 = 1.0f;
 
-  const float F[3][3] = {
-    {1.0f, dt,   0.5f * dt2},
-    {0.0f, 1.0f, dt},
-    {0.0f, 0.0f, 1.0f}
-  };
+  // Current state
+  const float x1 = visual_servoing.kf_x1;
+  const float x2 = visual_servoing.kf_x2;
 
-  const float G[3] = {
-    dt3 / 6.0f,
-    0.5f * dt2,
-    dt
-  };
+  // Predict state
+  const float x1_pred = A11 * x1 + A12 * x2;
+  const float x2_pred = A21 * x1 + A22 * x2;
 
-  const float sigma_j2 =
-    VS_KF3_SIGMA_JERK_PX_S3 * VS_KF3_SIGMA_JERK_PX_S3;
+  visual_servoing.kf_x1_pred = x1_pred;
+  visual_servoing.kf_x2_pred = x2_pred;
 
-  float Q[3][3];
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      Q[i][j] = sigma_j2 * G[i] * G[j];
-    }
+  // Predict covariance: P_pred = A P A' + Q
+  const float p11 = visual_servoing.kf_p11;
+  const float p12 = visual_servoing.kf_p12;
+  const float p21 = visual_servoing.kf_p21;
+  const float p22 = visual_servoing.kf_p22;
+
+  const float ap11 = A11*p11 + A12*p21;
+  const float ap12 = A11*p12 + A12*p22;
+  const float ap21 = A21*p11 + A22*p21;
+  const float ap22 = A21*p12 + A22*p22;
+
+  float p11_pred = ap11*A11 + ap12*A12 + visual_servoing.kf_q11;
+  float p12_pred = ap11*A21 + ap12*A22;
+  float p21_pred = ap21*A11 + ap22*A12;
+  float p22_pred = ap21*A21 + ap22*A22 + visual_servoing.kf_q22;
+
+  // Measurement z = [of_meas; ofd_meas], H = I
+  const float y1 = of_meas  - x1_pred;
+  const float y2 = ofd_meas - x2_pred;
+
+  // S = P_pred + R
+  const float s11 = p11_pred + visual_servoing.kf_r11;
+  const float s12 = p12_pred;
+  const float s21 = p21_pred;
+  const float s22 = p22_pred + visual_servoing.kf_r22;
+
+  const float detS = s11*s22 - s12*s21;
+  if (fabsf(detS) < 1e-12f) {
+    // Fallback: keep prediction
+    visual_servoing.kf_x1 = x1_pred;
+    visual_servoing.kf_x2 = x2_pred;
+    visual_servoing.kf_p11 = p11_pred;
+    visual_servoing.kf_p12 = p12_pred;
+    visual_servoing.kf_p21 = p21_pred;
+    visual_servoing.kf_p22 = p22_pred;
+    return;
   }
 
-  /* Current complete state. */
-  const float x[3] = {
-    kf3_centroid,
-    visual_servoing.kf_x1,
-    visual_servoing.kf_x2
-  };
+  // inv(S)
+  const float invS11 =  s22 / detS;
+  const float invS12 = -s12 / detS;
+  const float invS21 = -s21 / detS;
+  const float invS22 =  s11 / detS;
 
-  /* State prediction. */
-  float x_pred[3] = {0.0f, 0.0f, 0.0f};
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      x_pred[i] += F[i][j] * x[j];
-    }
-  }
+  // K = P_pred * inv(S)
+  const float K11 = p11_pred*invS11 + p12_pred*invS21;
+  const float K12 = p11_pred*invS12 + p12_pred*invS22;
+  const float K21 = p21_pred*invS11 + p22_pred*invS21;
+  const float K22 = p21_pred*invS12 + p22_pred*invS22;
 
-  kf3_centroid_pred = x_pred[0];
-  visual_servoing.kf_centroid_pred = x_pred[0];
-  visual_servoing.kf_x1_pred = x_pred[1];
-  visual_servoing.kf_x2_pred = x_pred[2];
+  // Update state
+  visual_servoing.kf_x1 = x1_pred + K11*y1 + K12*y2;
+  visual_servoing.kf_x2 = x2_pred + K21*y1 + K22*y2;
 
-  /* P_pred = F P F' + Q. */
-  float FP[3][3] = {{0.0f}};
-  float P_pred[3][3] = {{0.0f}};
+  // Update covariance: P = (I - K) P_pred   since H = I
+  const float IK11 = 1.0f - K11;
+  const float IK12 =      - K12;
+  const float IK21 =      - K21;
+  const float IK22 = 1.0f - K22;
 
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      for (uint8_t k = 0U; k < 3U; k++) {
-        FP[i][j] += F[i][k] * kf3_p[k][j];
-      }
-    }
-  }
-
-  for (uint8_t i = 0U; i < 3U; i++) {
-    for (uint8_t j = 0U; j < 3U; j++) {
-      for (uint8_t k = 0U; k < 3U; k++) {
-        P_pred[i][j] += FP[i][k] * F[j][k];
-      }
-      P_pred[i][j] += Q[i][j];
-    }
-  }
-
-  /* Scalar centroid innovation because H = [1 0 0]. */
-  const float innovation = centroid_meas - x_pred[0];
-  visual_servoing.kf_innov_centroid = innovation;
-
-  const float R = VS_KF3_SIGMA_C_PX * VS_KF3_SIGMA_C_PX;
-  const float S = P_pred[0][0] + R;
-
-  if (!isfinite(S) || S <= 1.0e-9f) {
-    /* Defensive fallback: keep prediction and covariance. */
-    kf3_centroid = x_pred[0];
-    visual_servoing.kf_x1 = x_pred[1];
-    visual_servoing.kf_x2 = x_pred[2];
-
-    for (uint8_t i = 0U; i < 3U; i++) {
-      for (uint8_t j = 0U; j < 3U; j++) {
-        kf3_p[i][j] = P_pred[i][j];
-      }
-    }
-  } else {
-    /* K = P_pred H' / S = first column(P_pred) / S. */
-    float K[3];
-    for (uint8_t i = 0U; i < 3U; i++) {
-      K[i] = P_pred[i][0] / S;
-    }
-
-    /* State correction. */
-    kf3_centroid = x_pred[0] + K[0] * innovation;
-    visual_servoing.kf_x1 = x_pred[1] + K[1] * innovation;
-    visual_servoing.kf_x2 = x_pred[2] + K[2] * innovation;
-
-    /*
-     * Joseph covariance update for numerical robustness:
-     *
-     *   P = (I-KH) P_pred (I-KH)' + K R K'
-     */
-    float A[3][3] = {
-      {1.0f - K[0], 0.0f, 0.0f},
-      {-K[1],       1.0f, 0.0f},
-      {-K[2],       0.0f, 1.0f}
-    };
-
-    float ikh_p[3][3] = {{0.0f}};
-    float P_new[3][3] = {{0.0f}};
-
-    for (uint8_t i = 0U; i < 3U; i++) {
-      for (uint8_t j = 0U; j < 3U; j++) {
-        for (uint8_t k = 0U; k < 3U; k++) {
-          ikh_p[i][j] += A[i][k] * P_pred[k][j];
-        }
-      }
-    }
-
-    for (uint8_t i = 0U; i < 3U; i++) {
-      for (uint8_t j = 0U; j < 3U; j++) {
-        for (uint8_t k = 0U; k < 3U; k++) {
-          P_new[i][j] += ikh_p[i][k] * A[j][k];
-        }
-        P_new[i][j] += K[i] * R * K[j];
-      }
-    }
-
-    /* Symmetrize explicitly to suppress floating-point drift. */
-    for (uint8_t i = 0U; i < 3U; i++) {
-      for (uint8_t j = 0U; j < 3U; j++) {
-        kf3_p[i][j] = 0.5f * (P_new[i][j] + P_new[j][i]);
-      }
-    }
-  }
-
-  /* Expose posterior centroid and full covariance for diagnostics/logging. */
-  visual_servoing.kf_centroid = kf3_centroid;
-
-  visual_servoing.kf_p00 = kf3_p[0][0];
-  visual_servoing.kf_p01 = kf3_p[0][1];
-  visual_servoing.kf_p02 = kf3_p[0][2];
-  visual_servoing.kf_p10 = kf3_p[1][0];
-  visual_servoing.kf_p11 = kf3_p[1][1];
-  visual_servoing.kf_p12 = kf3_p[1][2];
-  visual_servoing.kf_p20 = kf3_p[2][0];
-  visual_servoing.kf_p21 = kf3_p[2][1];
-  visual_servoing.kf_p22 = kf3_p[2][2];
-
-  /* Expose corresponding process-noise diagonals and centroid R. */
-  visual_servoing.kf_q11 = Q[1][1];
-  visual_servoing.kf_q22 = Q[2][2];
-  visual_servoing.kf_r11 = R;
-  visual_servoing.kf_r22 = 0.0f;
+  visual_servoing.kf_p11 = IK11*p11_pred + IK12*p21_pred;
+  visual_servoing.kf_p12 = IK11*p12_pred + IK12*p22_pred;
+  visual_servoing.kf_p21 = IK21*p11_pred + IK22*p21_pred;
+  visual_servoing.kf_p22 = IK21*p12_pred + IK22*p22_pred;
 }
 
 /**

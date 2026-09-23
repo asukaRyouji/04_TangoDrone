@@ -10,8 +10,8 @@
       <define name="SET_POINT" value="0.1" description="divergence set-point"/>
       <define name="OL_X_PGAIN" value="0.1" description="outer loop x proportional gain"/>
       <define name="OL_X_IGAIN" value="0" description="outer loop x integral gain"/>
-      <define name="OL_Y_OF_GAIN" value="3.2" description="outer loop y optic flow gain"/>
-      <define name="OL_Y_YAW_GAIN" value="3.2" description="outer loop y yawVel gain"/>
+      <define name="OL_Y_OF_GAIN" value="4.0" description="outer loop y optic flow gain"/>
+      <define name="OL_Y_YAW_GAIN" value="2.0" description="outer loop y yawVel gain"/>
       <define name="OL_Z_PGAIN" value="7.5" description="outer loop z proportional gain"/>
       <define name="OL_Z_DGAIN" value="0.0075" description="outer loop z derivative gain"/>
       <define name="OL_Z_PFF" value="10.0" description="outer loop z feedforward"/>
@@ -100,7 +100,7 @@
 
       <define
         name="OF_SCALE"
-        value="0.005"
+        value="0.0044"
         description="Scale factor applied to lateral optic flow"/>
 
       <define

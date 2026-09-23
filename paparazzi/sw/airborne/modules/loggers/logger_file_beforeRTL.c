@@ -6,14 +6,13 @@
  *   - external-pose receive timing
  *   - moving-target/setup ground truth
  *   - vision timing/validity and centroid
- *   - raw + KF3-filtered OF and image acceleration
- *   - complete KF3 state/covariance/tuning diagnostics
- *   - minimal VS activation + 2 s KF3 pre-roll diagnostics
+ *   - raw + KF-filtered OF and OF derivative
+ *   - KF state/covariance/tuning parameters
  *   - lateral OF/yaw controller diagnostics
  *   - logger execution-time diagnostics
  *
  * Removes the older hover-tuning blocks:
- *   detailed VS settle kinematics/trim diagnostics,
+ *   camera callback profiling, VS settle/activation diagnostics,
  *   forward PID internals, vertical/horizontal guidance internals,
  *   Bebop RPMs, full ins_ext_pose dump, INDI internals, actuator commands.
  */
@@ -143,70 +142,37 @@ static void logger_file_write_kf_visual_header(FILE *file)
     "vs_control_dt,"
     "vs_pose_ok,"
 
-    /* Minimal activation / pre-roll diagnostics. */
-    "vs_activation_state,"
-    "vs_settle_condition,"
-    "vs_settle_ready,"
-    "kf_warmup_start_us,"
-    "kf_warmup_valid_frames,"
-    "kf_warmup_elapsed,"
-    "kf_warmup_ready,"
-
     /* Direct visual measurements. */
     "vs_color_count,"
     "vs_centroid_x,"
     "vs_centroid_y,"
 
-    /*
-     * Raw finite-difference diagnostics and KF3 output.
-     *
-     * vs_of_y   = KF3 estimated image velocity / optic flow [px/s]
-     * vs_of_y_d = KF3 estimated image acceleration [px/s^2]
-     */
+    /* Raw and filtered OF signals. */
     "vs_raw_of_y,"
     "vs_of_y,"
     "vs_raw_of_y_d,"
     "vs_of_y_d,"
 
-    /*
-     * KF3 state / prediction diagnostics.
-     *
-     * State ordering:
-     *   [ centroid_y, OF_y, image_acceleration_y ]
-     *
-     * The true scalar innovation is centroid measurement minus
-     * predicted centroid.
-     */
-    "kf_centroid,"
-    "kf_centroid_pred,"
+    /* KF state before measurement update. */
     "kf_x1_pred,"
     "kf_x2_pred,"
-    "kf_innov_centroid,"
 
-    /* Complete KF3 posterior covariance P. */
-    "kf_p00,"
-    "kf_p01,"
-    "kf_p02,"
-    "kf_p10,"
+    /* KF posterior covariance. */
     "kf_p11,"
     "kf_p12,"
-    "kf_p20,"
     "kf_p21,"
     "kf_p22,"
 
-    /*
-     * KF3 tuning diagnostics.
-     *
-     * q11 = Q(OF,OF)
-     * q22 = Q(acceleration,acceleration)
-     * r11 = centroid measurement variance [px^2]
-     * r22 = unused compatibility field (0)
-     */
+    /* KF tuning values, repeated intentionally as flight metadata. */
     "kf_q11,"
     "kf_q22,"
     "kf_r11,"
     "kf_r22,"
     "kf_initialized,"
+
+    /* Innovation can be reconstructed from raw measurement - prediction. */
+    "kf_innov_of,"
+    "kf_innov_ofd,"
 
     /* Lateral-controller context. */
     "vs_yaw_vel,"
@@ -225,39 +191,33 @@ static void logger_file_write_kf_visual_header(FILE *file)
 
 static void logger_file_write_kf_visual_row(FILE *file)
 {
+  const float kf_innov_of =
+    visual_servoing.raw_of_y - visual_servoing.kf_x1_pred;
+
+  const float kf_innov_ofd =
+    visual_servoing.raw_of_y_d - visual_servoing.kf_x2_pred;
+
   fprintf(
     file,
 
-    /* Vision timing / validity. */
     "%u,%u,%u,"
     "%u,%u,%u,%u,"
     "%f,%f,%f,"
     "%u,"
 
-    /* Activation / KF3 pre-roll. */
-    "%u,%u,%u,"
-    "%u,%u,"
-    "%f,%u,"
-
-    /* Direct visual measurements. */
     "%f,%f,%f,"
 
-    /* Raw diagnostics + KF3 output. */
     "%f,%f,%f,%f,"
 
-    /* KF3 state/prediction + true centroid innovation. */
-    "%f,%f,%f,%f,%f,"
+    "%f,%f,"
 
-    /* Complete 3x3 posterior covariance. */
-    "%f,%f,%f,"
-    "%f,%f,%f,"
-    "%f,%f,%f,"
+    "%f,%f,%f,%f,"
 
-    /* Tuning + initialized flag. */
     "%f,%f,%f,%f,"
     "%u,"
 
-    /* Lateral-controller context. */
+    "%f,%f,"
+
     "%f,%f,%f,%f,%f,"
     "%f,%f,%f,%f,"
     "%u,%u,",
@@ -277,15 +237,6 @@ static void logger_file_write_kf_visual_row(FILE *file)
 
     visual_servoing.pose_ok ? 1U : 0U,
 
-    (unsigned int)visual_servoing.activation_state,
-    visual_servoing.settle_condition ? 1U : 0U,
-    visual_servoing.settle_ready ? 1U : 0U,
-
-    (unsigned int)visual_servoing.kf_warmup_start_us,
-    (unsigned int)visual_servoing.kf_warmup_valid_frames,
-    visual_servoing.kf_warmup_elapsed,
-    visual_servoing.kf_warmup_ready ? 1U : 0U,
-
     visual_servoing.color_count,
     visual_servoing.box_centroid_x,
     visual_servoing.box_centroid_y,
@@ -295,21 +246,11 @@ static void logger_file_write_kf_visual_row(FILE *file)
     visual_servoing.raw_of_y_d,
     visual_servoing.of_y_d,
 
-    visual_servoing.kf_centroid,
-    visual_servoing.kf_centroid_pred,
     visual_servoing.kf_x1_pred,
     visual_servoing.kf_x2_pred,
-    visual_servoing.kf_innov_centroid,
 
-    visual_servoing.kf_p00,
-    visual_servoing.kf_p01,
-    visual_servoing.kf_p02,
-
-    visual_servoing.kf_p10,
     visual_servoing.kf_p11,
     visual_servoing.kf_p12,
-
-    visual_servoing.kf_p20,
     visual_servoing.kf_p21,
     visual_servoing.kf_p22,
 
@@ -319,6 +260,9 @@ static void logger_file_write_kf_visual_row(FILE *file)
     visual_servoing.kf_r22,
 
     visual_servoing.kf_initialized ? 1U : 0U,
+
+    kf_innov_of,
+    kf_innov_ofd,
 
     visual_servoing.yaw_vel,
     visual_servoing.of_scale,
