@@ -10,8 +10,6 @@
       <define name="SET_POINT" value="0.1" description="divergence set-point"/>
       <define name="OL_X_PGAIN" value="0.1" description="outer loop x proportional gain"/>
       <define name="OL_X_IGAIN" value="0" description="outer loop x integral gain"/>
-      <define name="OL_Y_OF_GAIN" value="4.0" description="outer loop y optic flow gain"/>
-      <define name="OL_Y_YAW_GAIN" value="2.0" description="outer loop y yawVel gain"/>
       <define name="OL_Z_PGAIN" value="7.5" description="outer loop z proportional gain"/>
       <define name="OL_Z_DGAIN" value="0.0075" description="outer loop z derivative gain"/>
       <define name="OL_Z_PFF" value="10.0" description="outer loop z feedforward"/>
@@ -98,6 +96,16 @@
         ==========================================================
       -->
 
+      <define 
+        name="OL_Y_OF_GAIN" 
+        value="5.8" 
+        description="outer loop y optic flow gain"/>
+
+      <define 
+        name="OL_Y_YAW_GAIN" 
+        value="5.8" 
+        description="outer loop y yawVel gain"/>
+
       <define
         name="OF_SCALE"
         value="0.0044"
@@ -105,19 +113,23 @@
 
       <define
         name="LAT_MAX_ACCEL"
-        value="0.30"
+        value="10.0"
         description="Maximum lateral acceleration command"/>
 
       <define
+        name="LAT_ACCEL_SLEW"
+        value="15.00"
+        description="Horizontal acceleration-command slew rate"/>
+
+      <define
         name="LAT_FALLBACK_KD"
-        value="0.80"
+        value="1.20"
         description="Lateral velocity damping during target loss or startup"/>
 
       <define
-        name="ACCEL_SLEW"
-        value="1.00"
-        description="Horizontal acceleration-command slew rate"/>
-
+        name="MAX_ROLL_DEG"
+        value="45.0"
+        description="Maximum absolute roll command in degrees"/>
 
       <!--
         ==========================================================
@@ -156,11 +168,6 @@
         name="MAX_PITCH_DEG"
         value="4.0"
         description="Maximum absolute pitch command in degrees"/>
-
-      <define
-        name="MAX_ROLL_DEG"
-        value="4.0"
-        description="Maximum absolute roll command in degrees"/>
 
       <!--
         ==========================================================

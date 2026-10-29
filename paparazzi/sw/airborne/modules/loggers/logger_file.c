@@ -33,7 +33,9 @@
 
 #include "modules/visual_servoing/visual_servoing.h"
 #include "modules/mission/moving_setup_logger_optitrack.h"
+#ifndef VS_SIM_NO_EXT_POSE
 #include "modules/ins/ins_ext_pose.h"
+#endif
 
 #ifndef LOGGER_FILE_PATH
 #define LOGGER_FILE_PATH /data/video/usb
@@ -217,6 +219,7 @@ static void logger_file_write_kf_visual_header(FILE *file)
     "vs_mu_y_of,"
     "vs_mu_y_yaw,"
     "vs_mu_y_fallback,"
+    "vs_mu_y_active,"
     "vs_mu_y_control,"
     "vs_using_of,"
     "vs_using_fallback,"
@@ -259,7 +262,7 @@ static void logger_file_write_kf_visual_row(FILE *file)
 
     /* Lateral-controller context. */
     "%f,%f,%f,%f,%f,"
-    "%f,%f,%f,%f,"
+    "%f,%f,%f,%f,%f,"
     "%u,%u,",
 
     (unsigned int)visual_servoing.vision_stamp_us,
@@ -329,6 +332,7 @@ static void logger_file_write_kf_visual_row(FILE *file)
     visual_servoing.mu_y_of,
     visual_servoing.mu_y_yaw,
     visual_servoing.mu_y_fallback,
+    visual_servoing.mu_y_active,
     visual_servoing.mu_y_control,
 
     visual_servoing.using_of_control ? 1U : 0U,

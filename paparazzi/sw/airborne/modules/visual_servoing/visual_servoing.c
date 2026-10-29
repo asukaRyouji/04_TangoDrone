@@ -23,11 +23,27 @@
 #include "firmwares/rotorcraft/stabilization/stabilization_indi_simple.h"
 #include "generated/airframe.h"
 #include "state.h"
+#ifndef VS_SIM_NO_EXT_POSE
 #include "modules/ins/ins_ext_pose.h"
+#endif
 #include "modules/core/abi.h"
 #include "modules/datalink/telemetry.h"
 #include <stdio.h>
 #include <time.h>
+
+/* NPS uses ins_nps simulated vehicle state, not the OptiTrack ins_ext_pose EKF.
+ * This bypass is deliberately enabled ONLY in the nps airframe target.
+ * The real Bebop retains BOTH real external-pose readiness/freshness checks.
+ */
+static bool visual_servoing_pose_available(void)
+{
+#ifdef VS_SIM_NO_EXT_POSE
+  return true;
+#else
+  return ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
+#endif
+}
+
 
 #define ORANGE_AVOIDER_VERBOSE TRUE
 
@@ -52,14 +68,6 @@
 
 #ifndef VS_OL_X_IGAIN
 #define VS_OL_X_IGAIN 0.015
-#endif
-
-#ifndef VS_OL_Y_OF_GAIN
-#define VS_OL_Y_OF_GAIN 4.0
-#endif
-
-#ifndef VS_OL_Y_YAW_GAIN
-#define VS_OL_Y_YAW_GAIN 2.0
 #endif
 
 #ifndef VS_OL_Y_OA_GAIN
@@ -273,21 +281,32 @@
  * ==============================================================
  */
 
+#ifndef VS_OL_Y_OF_GAIN
+#define VS_OL_Y_OF_GAIN 5.80f
+#endif
+
+#ifndef VS_OL_Y_YAW_GAIN
+#define VS_OL_Y_YAW_GAIN 5.80f
+#endif
+
+/* ONE total lateral acceleration limit: responsive OF+yaw plus optional H1+H2. */
+#ifndef VS_LAT_MAX_ACCEL
+#define VS_LAT_MAX_ACCEL 10.00f
+#endif
+
+#ifndef VS_LAT_ACCEL_SLEW
+#define VS_LAT_ACCEL_SLEW 15.00f
+#endif
+
+#ifndef VS_MAX_ROLL_DEG
+#define VS_MAX_ROLL_DEG 45.0f
+#endif
+
 /*
  * Preserve the scaling used in the earlier experiments.
  */
 #ifndef VS_OF_SCALE
 #define VS_OF_SCALE 0.0044f
-#endif
-
-/*
- * First-flight lateral acceleration limit.
- *
- * This is intentionally much smaller than the approximately
- * 1 m/s^2 peak acceleration needed for final 1 Hz tracking.
- */
-#ifndef VS_LAT_MAX_ACCEL
-#define VS_LAT_MAX_ACCEL 0.30f
 #endif
 
 /*
@@ -298,11 +317,45 @@
 #define VS_LAT_FALLBACK_KD 1.20f
 #endif
 
-/*
- * Slew limit for both horizontal acceleration-vector commands.
+/* Forward slew remains unchanged; lateral slew is separate for OF + H1. */
+#ifndef VS_FWD_ACCEL_SLEW
+#define VS_FWD_ACCEL_SLEW 1.00f
+#endif
+
+#ifndef VS_USE_OF_LATERAL_CONTROL
+#define VS_USE_OF_LATERAL_CONTROL TRUE
+#endif
+
+/* ONE compile-time oscillator switch: H1+H2 ON/OFF together.
+ * Keep exploratory settings OFF the real aircraft. */
+#ifndef VS_SELF_OSC
+#define VS_SELF_OSC TRUE
+#endif
+
+#ifndef VS_SELF_OSC_FREQ_HZ
+#define VS_SELF_OSC_FREQ_HZ 0.53f
+#endif
+/* Peak additional lateral acceleration, NOT displacement amplitude [m/s^2]. */
+#ifndef VS_SELF_OSC_AMPLITUDE
+#define VS_SELF_OSC_AMPLITUDE 1.123f
+#endif
+/* Additional second acceleration harmonic at exactly 2*f_H1 [m/s^2].
+ * Set this amplitude to 0.0f for a matched H1-only comparison.
+ * The P3 medoid specifies AH2=0.608 but no H2-vs-H1 phase; phase=0
+ * below is an explicit TEST assumption, not a fitted biological phase.
  */
-#ifndef VS_ACCEL_SLEW
-#define VS_ACCEL_SLEW 1.00f
+#ifndef VS_SELF_OSC_H2_AMPLITUDE
+#define VS_SELF_OSC_H2_AMPLITUDE -0.608f
+#endif
+#ifndef VS_SELF_OSC_H2_PHASE_RAD
+#define VS_SELF_OSC_H2_PHASE_RAD 0.0f
+#endif
+
+/* These high-excitation defaults are an exploratory NPS experiment ONLY.
+ * Remove/retune them deliberately before compiling for a physical aircraft.
+ */
+#if !defined(VS_SIM_NO_EXT_POSE) && VS_SELF_OSC
+#error "H1+H2 high-authority exploration is NPS-only: disable VS_SELF_OSC and restore flight limits before AP build"
 #endif
 
 
@@ -385,10 +438,6 @@
 #define VS_MAX_PITCH_DEG 4.0f
 #endif
 
-#ifndef VS_MAX_ROLL_DEG
-#define VS_MAX_ROLL_DEG 4.0f
-#endif
-
 /*
  * ==============================================================
  * Settle-before-activation parameters
@@ -466,10 +515,6 @@
  */
 #ifndef VS_SETTLE_VERTICAL_POS_MAX
 #define VS_SETTLE_VERTICAL_POS_MAX 0.050f
-#endif
-
-#ifndef VS_USE_OF_LATERAL_CONTROL
-#define VS_USE_OF_LATERAL_CONTROL 1
 #endif
 
 // define and initialise global variables
@@ -798,7 +843,12 @@ void visual_servoing_module_init(void)
 
   visual_servoing.lat_fallback_kd = VS_LAT_FALLBACK_KD;
 
-  visual_servoing.accel_slew = VS_ACCEL_SLEW;
+  visual_servoing.accel_slew = VS_FWD_ACCEL_SLEW;
+  visual_servoing.lat_accel_slew = VS_LAT_ACCEL_SLEW;
+
+  /* Phase state only: ON/OFF, frequency and amplitude are VS_* macros. */
+  visual_servoing.self_oscillation_phase = 0.0f;
+  visual_servoing.mu_y_active = 0.0f;
 
   /*
    * Vision-validity parameters.
@@ -1056,6 +1106,10 @@ static void reset_all_vars(void)
   reset_switch_time_end_bool = FALSE;
   switch_count = 0;
 
+  /* Begin each MODULE entry from zero H1 phase. */
+  visual_servoing.self_oscillation_phase = 0.0f;
+  visual_servoing.mu_y_active = 0.0f;
+
   /*
    * Capture the current hover reference, heading and trim only
    * after all legacy controller states have been reset.
@@ -1196,6 +1250,8 @@ void visual_servoing_request_start(void)
 
 void visual_servoing_cancel_request(void)
 {
+  visual_servoing.self_oscillation_phase = 0.0f;
+  visual_servoing.mu_y_active = 0.0f;
   /*
    * Clear all request and timing state.
    *
@@ -1678,7 +1734,11 @@ static void visual_servoing_capture_reference(void)
    * Forward pitch bias remains fixed at the already identified
    * aircraft-specific value.
    */
-  visual_servoing.pitch_trim = RadOfDeg(VS_FIXED_PITCH_TRIM_DEG);
+  #ifdef VS_SIM_NO_EXT_POSE
+    visual_servoing.pitch_trim = 0.0f;
+  #else
+    visual_servoing.pitch_trim = RadOfDeg(VS_FIXED_PITCH_TRIM_DEG);
+  #endif
 
 
   /*
@@ -1776,7 +1836,7 @@ static void visual_servoing_capture_reference(void)
     visual_servoing_reset_of_state();
   }
 
-  visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
+  visual_servoing.pose_ok = visual_servoing_pose_available();
 
   /*
   * ============================================================
@@ -2337,7 +2397,7 @@ void visual_servoing_observer_periodic(void)
    * The observer does not command the aircraft; this flag only
    * determines whether OF is permitted to become control-ready.
    */
-  visual_servoing.pose_ok = ins_ext_pose_is_ready() && ins_ext_pose_is_fresh();
+  visual_servoing.pose_ok = visual_servoing_pose_available();
 
   /*
   * ==============================================================
@@ -2744,73 +2804,68 @@ void visual_servoing_module_run(bool in_flight)
    */
 
   visual_servoing.yaw_vel = rates->r;
-
   visual_servoing.of_scaled = visual_servoing.of_scale * visual_servoing.of_y;
 
   visual_servoing.mu_y_of = 0.0f;
   visual_servoing.mu_y_yaw = 0.0f;
   visual_servoing.mu_y_fallback = 0.0f;
-
+  visual_servoing.mu_y_active = 0.0f;    /* Combined H1+H2, before total limiting */
   visual_servoing.using_of_control = false;
   visual_servoing.using_lateral_fallback = false;
 
   if (VS_USE_OF_LATERAL_CONTROL && visual_servoing.pose_ok && visual_servoing.of_ready) {
-    /*
-     * Preserve the experimentally derived controller structure:
-     *
-     *   mu_y =
-     *       -K_OF  * scaled_OF
-     *       +K_YAW * yaw_rate
-     *
-     * There is deliberately no world-frame lateral-position term.
-     */
+    /* Original responsive OF + yaw controller. */
     visual_servoing.mu_y_of = -visual_servoing.ol_y_OF_gain * visual_servoing.of_scaled;
-
     visual_servoing.mu_y_yaw = visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
-
     visual_servoing.mu_y_control = visual_servoing.mu_y_of + visual_servoing.mu_y_yaw;
+
+    /* Inject H1 + H2 only while the ORIGINAL OF controller is healthy.
+     * One oscillator phase, no separate ON/OFF API or second phase clock:
+     *   H1 = A1*cos(phi)
+     *   H2 = A2*cos(2*phi + phi2), exactly double H1 frequency.
+     * mu_y_active is the COMBINED addition; existing logger stays valid.
+     */
+    if (VS_SELF_OSC && in_flight) {
+      const float phi = visual_servoing.self_oscillation_phase;
+      const float h1 = VS_SELF_OSC_AMPLITUDE * cosf(phi);
+      const float h2 = VS_SELF_OSC_H2_AMPLITUDE *
+                       cosf(2.0f * phi + VS_SELF_OSC_H2_PHASE_RAD);
+      visual_servoing.mu_y_active = h1 + h2;
+      visual_servoing.mu_y_control += visual_servoing.mu_y_active;
+    }
 
     visual_servoing.using_of_control = true;
   }
   else if (visual_servoing.pose_ok) {
-    /*
-     * Target-loss/startup fallback:
-     *
-     * only damp lateral velocity. Do not hold an absolute lateral
-     * position, because that would conflict with flower following.
-     *
-     * Any interval using this fallback must be marked invalid for
-     * the optic-flow experiment.
-     */
+    /* No valid OF: original lateral-velocity damping only; never inject H1/H2. */
     visual_servoing.mu_y_fallback = -visual_servoing.lat_fallback_kd * visual_servoing.right_velocity;
-
     visual_servoing.mu_y_control = visual_servoing.mu_y_fallback;
-
     visual_servoing.using_lateral_fallback = true;
   }
   else {
-    /*
-     * Pose is stale: return toward captured trim without trusting
-     * position or velocity feedback.
-     */
+    /* Stale pose: original behaviour, return toward captured roll trim. */
     visual_servoing.mu_y_control = 0.0f;
   }
 
-  Bound(
-    visual_servoing.mu_y_control,
-    -visual_servoing.lat_max_accel,
-     visual_servoing.lat_max_accel
-  );
+  /* Free-running common H1/H2 clock: temporary vision loss masks injection but
+   * must not restart the cosine at a positive peak when vision returns.
+   * MODULE entry and cancel_request still reset phase to zero.
+   */
+  if (VS_SELF_OSC && in_flight) {
+    visual_servoing.self_oscillation_phase +=
+        2.0f * (float)M_PI * VS_SELF_OSC_FREQ_HZ * control_dt;
+    if (visual_servoing.self_oscillation_phase >= 2.0f * (float)M_PI) {
+      visual_servoing.self_oscillation_phase -= 2.0f * (float)M_PI;
+    }
+  }
 
+  /* ONE total OF+yaw+H1+H2 acceleration bound and ONE lateral slew limiter. */
+  Bound(visual_servoing.mu_y_control,
+        -visual_servoing.lat_max_accel, visual_servoing.lat_max_accel);
   visual_servoing.mu_y_target = visual_servoing.mu_y_trim + visual_servoing.mu_y_control;
-
-  visual_servoing.mu_y =
-    visual_servoing_slew(
-      visual_servoing.mu_y,
-      visual_servoing.mu_y_target,
-      visual_servoing.accel_slew,
-      control_dt
-    );
+  visual_servoing.mu_y = visual_servoing_slew(
+      visual_servoing.mu_y, visual_servoing.mu_y_target,
+      visual_servoing.lat_accel_slew, control_dt);
 
   /*
    * ============================================================
@@ -3130,7 +3185,7 @@ static void visual_servoing_kf_update(float centroid_meas, float dt)
      *
      *   P = (I-KH) P_pred (I-KH)' + K R K'
      */
-    float A[3][3] = {
+    float i_kh[3][3] = {
       {1.0f - K[0], 0.0f, 0.0f},
       {-K[1],       1.0f, 0.0f},
       {-K[2],       0.0f, 1.0f}
@@ -3142,7 +3197,7 @@ static void visual_servoing_kf_update(float centroid_meas, float dt)
     for (uint8_t i = 0U; i < 3U; i++) {
       for (uint8_t j = 0U; j < 3U; j++) {
         for (uint8_t k = 0U; k < 3U; k++) {
-          ikh_p[i][j] += A[i][k] * P_pred[k][j];
+          ikh_p[i][j] += i_kh[i][k] * P_pred[k][j];
         }
       }
     }
@@ -3150,7 +3205,7 @@ static void visual_servoing_kf_update(float centroid_meas, float dt)
     for (uint8_t i = 0U; i < 3U; i++) {
       for (uint8_t j = 0U; j < 3U; j++) {
         for (uint8_t k = 0U; k < 3U; k++) {
-          P_new[i][j] += ikh_p[i][k] * A[j][k];
+          P_new[i][j] += ikh_p[i][k] * i_kh[j][k];
         }
         P_new[i][j] += K[i] * R * K[j];
       }

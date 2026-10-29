@@ -27,9 +27,10 @@
       <define name="COLOR_OBJECT_DETECTOR_CR_MAX2" value="140"/>
     </target>
     <target name="nps" board="pc">
+      <define name="VS_SIM_NO_EXT_POSE" value="1"/>
       <module name="fdm" type="gazebo"/>
       <define name="VIDEO_CAPTURE_PATH" value="/tmp/paparazzi/images"/>
-      <define name="LOGGER_FILE_PATH" value="/home/admin_user/Desktop/Gain_tuning/Centering_approach/Vx_0.02/K_4.8/Init_0.2/pprz_data"/>
+      <define name="LOGGER_FILE_PATH" value="/home/admin_user/Desktop/Active_2909/data_pprz"/>
       
       <!-- Detect orange -->
       <define name="COLOR_OBJECT_DETECTOR_LUM_MIN1" value="41"/>
@@ -179,26 +180,34 @@
       <!--
         Lateral OF and fallback controller.
       -->
-      <define name="VS_OL_Y_OF_GAIN"
-              value="4.00"/>
 
-      <define name="VS_OL_Y_YAW_GAIN"
-              value="2.00"/>
 
       <define name="VS_OL_Y_OA_GAIN"
               value="0.0"/>
+
+      <define name="VS_OL_Y_OF_GAIN"
+              value="5.8"/>
+
+      <define name="VS_OL_Y_YAW_GAIN"
+              value="5.8"/>
 
       <define name="VS_OF_SCALE"
               value="0.0044"/>
 
       <define name="VS_LAT_MAX_ACCEL"
-              value="0.30"/>
+              value="10.00"/>
+
+      <define name="VS_LAT_ACCEL_SLEW"
+              value="15.00"/>
 
       <define name="VS_LAT_FALLBACK_KD"
               value="1.20"/>
 
-      <define name="VS_ACCEL_SLEW"
+      <define name="VS_FWD_ACCEL_SLEW"
               value="1.00"/>
+
+      <define name="VS_MAX_ROLL_DEG"
+              value="45.0"/>
 
 
       <!--
@@ -226,8 +235,7 @@
       <define name="VS_MAX_PITCH_DEG"
               value="4.0"/>
 
-      <define name="VS_MAX_ROLL_DEG"
-              value="4.0"/>
+
 
     </module>
 
@@ -388,20 +396,27 @@
 
   <section name="STABILIZATION_ATTITUDE_INDI" prefix="STABILIZATION_INDI_">
     <!-- control effectiveness -->
+    <!-- control effectiveness voor 0416-->
     <!-- <define name="G1_P" value="0.0423"/>
     <define name="G1_Q" value="0.0354"/>
     <define name="G1_R" value="0.0020"/>
     <define name="G2_R" value="0.1462"/> -->
-    <!-- control effectiveness voor 0416-->
-    <!-- define name="G1_P" value="0.1009"/ -->
-    <!--define name="G1_Q" value="0.0581"/ -->
-    <!--define name="G1_R" value="0.0037"/ -->
-    <!--define name="G2_R" value="0.2062"/ -->
     <!-- control effectiveness voor 0428-->
-    <define name="G1_P" value="0.0694"/>
+    <!-- <define name="G1_P" value="0.1009"/>
+    <define name="G1_Q" value="0.0581"/>
+    <define name="G1_R" value="0.0037"/>
+    <define name="G2_R" value="0.2062"/> -->
+
+    <!-- control effectiveness voor real flight-->
+    <!-- <define name="G1_P" value="0.0694"/>
     <define name="G1_Q" value="0.0534"/>
     <define name="G1_R" value="0.0047"/>
-    <define name="G2_R" value="0.2412"/>
+    <define name="G2_R" value="0.2412"/> -->
+    <!-- control effectiveness voor gazebo simulation-->
+    <define name="G1_P" value="0.0285"/>
+    <define name="G1_Q" value="0.0230"/>
+    <define name="G1_R" value="0.0022"/>
+    <define name="G2_R" value="0.0867"/>
    
 
     <define name="FILTER_ROLL_RATE" value="TRUE"/>

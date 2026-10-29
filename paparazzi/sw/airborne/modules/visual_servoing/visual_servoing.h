@@ -585,10 +585,11 @@ struct VisualServoing {
   float lat_max_accel;
   float lat_fallback_kd;
 
-  /*
-   * Maximum rate of change of mu_x and mu_y in m/s^3.
-   */
+  /* Forward slew unchanged; lateral slew separately adjusted for H1. */
   float accel_slew;
+  float lat_accel_slew;
+
+  float self_oscillation_phase;   /* Internal phase [rad]; switch uses VS_SELF_OSC macro. */
 
   /*
    * Initial attitude-command limits.
@@ -645,6 +646,7 @@ struct VisualServoing {
   float mu_y_of;
   float mu_y_yaw;
   float mu_y_fallback;
+  float mu_y_active;          /* requested additional H1 acceleration [m/s^2] */
   float mu_y_control;
 
   float mu_x_target;
