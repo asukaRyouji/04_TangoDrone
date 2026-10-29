@@ -28,10 +28,17 @@
 #include "std.h"
 #include "mcu_periph/sys_time.h"
 #include "state.h"
+#include "firmwares/rotorcraft/guidance/guidance_h.h"
 #include "generated/airframe.h"
 #include "generated/modules.h"
 
 #include "modules/visual_servoing/visual_servoing.h"
+#include "modules/computer_vision/cv_detect_color_object.h"
+#include "modules/visual_servoing/vs_distance_observer.h"
+#include "modules/visual_servoing/vs_log_utils.h"
+#ifdef VS_SIM_NO_EXT_POSE
+#include "mcu_periph/sim_clock_bridge.h"
+#endif
 #include "modules/mission/moving_setup_logger_optitrack.h"
 #ifndef VS_SIM_NO_EXT_POSE
 #include "modules/ins/ins_ext_pose.h"
@@ -42,6 +49,31 @@
 #endif
 
 static FILE *logger_file = NULL;
+static FILE *command_file = NULL;
+#if VS_COMMAND_TRACE
+static char command_file_buffer[64*1024];
+#endif
+static double logger_last_flush_s;
+static bool logger_exit_registered;
+#ifndef VS_EXPERIMENT_CASE_ID
+#define VS_EXPERIMENT_CASE_ID 0
+#endif
+#ifndef VS_EXPERIMENT_X0_M
+#define VS_EXPERIMENT_X0_M 0
+#endif
+#ifndef NPS_GAZEBO_SYNC_TIME
+#define NPS_GAZEBO_SYNC_TIME 0
+#endif
+#ifndef VS_SELF_OSC_FREQ_HZ
+#define VS_SELF_OSC_FREQ_HZ .53
+#endif
+#ifndef VS_SELF_OSC_AMPLITUDE
+#define VS_SELF_OSC_AMPLITUDE 1.123
+#endif
+#ifndef VS_SELF_OSC_H2_AMPLITUDE
+#define VS_SELF_OSC_H2_AMPLITUDE -.608
+#endif
+
 
 static uint32_t logger_last_write_usec = 0;
 static uint32_t logger_max_write_usec = 0;
@@ -340,6 +372,152 @@ static void logger_file_write_kf_visual_row(FILE *file)
   );
 }
 
+static void logger_observer_header(FILE *f)
+{
+  fputs("run_id,case_id,clock_sync,gazebo_pair_s,system_pair_s,clock_offset_s,clock_drift_s,clock_pairs,horizontal_mode,",f);
+  fputs("b54_capture_raw_us,b54_receive_us,b54_process_us,b54_accepted_sequence,b54_duplicate_count,b54_backward_count,b54_skipped_count,b54_source_age_s,b54_receive_age_s,b54_yaw_at_capture,b54_shadow_mu_y_of,b54_shadow_mu_y_yaw,b54_command_us,b54_command_sequence,b54_command_valid,b54_mu_y_unbounded,b54_mu_y_trim,b54_mu_y_target,b54_mu_y_final,b54_roll_sp,b54_total_limited,b54_slew_limited,b54_roll_limited,b54_oe_count,b54_oe_raw,b54_oe_derivative,b54_oe_output,b54_oe_innovation,b54_oe_variance,b54_oe_p00,b54_oe_p01,b54_oe_p02,b54_oe_p10,b54_oe_p11,b54_oe_p12,b54_oe_p20,b54_oe_p21,b54_oe_p22,b54_observer_h,b54_observer_rho,b54_observer_range_m,b54_observer_initial_h,b54_observer_residual,b54_observer_correction_raw,b54_observer_correction,b54_observer_valid,b54_observer_started,b54_observer_reason,b54_observer_resets,b54_observer_frames,b54_observer_steps,b54_observer_state_epoch_s,b54_observer_available_s,b54_observer_base_epoch_s,b54_observer_A_query_s,b54_held_F,b54_held_E,b54_held_A,b54_held_K,b54_held_g,b54_held_U,b54_model_t,b54_model_z,b54_model_y,b54_model_v,b54_model_u,b54_model_ready,b54_model_seeded,b54_model_warm_elapsed_s,b54_model_sequence,b54_model_resets,b54_vs_module_entry_s,b54_vs_oscillation_onset_s,b54_vs_have_oscillation_onset,b54_vs_entry_n,b54_vs_entry_e,b54_vs_entry_height,b54_vs_entry_vn,b54_vs_entry_ve,b54_vs_entry_vd,",f);
+}
+static void logger_observer_row(FILE *f)
+{
+  const struct VsDistanceObserver *o=&vs_distance_observer;
+  fprintf(f,"%s,%u,%u,",vs_run_id(),(unsigned)VS_EXPERIMENT_CASE_ID,(unsigned)NPS_GAZEBO_SYNC_TIME);
+#ifdef VS_SIM_NO_EXT_POSE
+  fprintf(f,"%.9f,%.9f,%.9g,%.9g,%u,",sim_clock_bridge.gazebo_s,sim_clock_bridge.system_s,
+      sim_clock_bridge.initial_offset_s,sim_clock_bridge.drift_s,(unsigned)sim_clock_bridge.pairs);
+#else
+  fputs("nan,nan,nan,nan,0,",f);
+#endif
+  fprintf(f,"%u,",(unsigned)guidance_h.mode);
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_capture_raw_us));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_receive_us));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_process_us));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_accepted_sequence));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_duplicate_count));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_backward_count));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.vision_skipped_count));
+  fprintf(f,"%.12g,",(double)(visual_servoing.vision_source_age));
+  fprintf(f,"%.12g,",(double)(visual_servoing.vision_receive_age));
+  fprintf(f,"%.12g,",(double)(visual_servoing.observer_yaw_at_capture));
+  fprintf(f,"%.12g,",(double)(visual_servoing.shadow_mu_y_of));
+  fprintf(f,"%.12g,",(double)(visual_servoing.shadow_mu_y_yaw));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.command_stamp_us));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.command_sequence));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.applied_command_valid));
+  fprintf(f,"%.12g,",(double)(visual_servoing.mu_y_unbounded));
+  fprintf(f,"%.12g,",(double)(visual_servoing.mu_y_trim));
+  fprintf(f,"%.12g,",(double)(visual_servoing.mu_y_target));
+  fprintf(f,"%.12g,",(double)(visual_servoing.mu_y));
+  fprintf(f,"%.12g,",(double)(visual_servoing.roll_sp_cmd));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.lat_total_limited));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.lat_slew_limited));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.roll_limited));
+  fprintf(f,"%.12g,",(double)(o->oe.count));
+  fprintf(f,"%.12g,",(double)(o->oe.OE));
+  fprintf(f,"%.12g,",(double)(o->oe.dot_OE));
+  fprintf(f,"%.12g,",(double)(o->oe_output));
+  fprintf(f,"%.12g,",(double)(o->oe_innovation));
+  fprintf(f,"%.12g,",(double)(o->oe_variance));
+  fprintf(f,"%.12g,",(double)(o->oe.P[0]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[1]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[2]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[3]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[4]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[5]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[6]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[7]));
+  fprintf(f,"%.12g,",(double)(o->oe.P[8]));
+  fprintf(f,"%.12g,",(double)(o->h));
+  fprintf(f,"%.12g,",(double)(o->rho));
+  fprintf(f,"%.12g,",(double)(o->range_m));
+  fprintf(f,"%.12g,",(double)(o->initial_h));
+  fprintf(f,"%.12g,",(double)(o->residual));
+  fprintf(f,"%.12g,",(double)(o->correction_raw));
+  fprintf(f,"%.12g,",(double)(o->correction));
+  fprintf(f,"%u,",(unsigned)(o->valid));
+  fprintf(f,"%u,",(unsigned)(o->started));
+  fprintf(f,"%u,",(unsigned)(o->reason));
+  fprintf(f,"%u,",(unsigned)(o->resets));
+  fprintf(f,"%u,",(unsigned)(o->frames));
+  fprintf(f,"%u,",(unsigned)(o->integration_steps));
+  fprintf(f,"%.12g,",(double)(o->estimate_epoch_s));
+  fprintf(f,"%.12g,",(double)(o->available_s));
+  fprintf(f,"%.12g,",(double)(o->base_t));
+  fprintf(f,"%.12g,",(double)(o->acceleration_query_s));
+  fprintf(f,"%.12g,",(double)(o->held.F));
+  fprintf(f,"%.12g,",(double)(o->held.E));
+  fprintf(f,"%.12g,",(double)(o->held.A));
+  fprintf(f,"%.12g,",(double)(o->held.K));
+  fprintf(f,"%.12g,",(double)(o->held.g));
+  fprintf(f,"%.12g,",(double)(o->held.U));
+  fprintf(f,"%.12g,",(double)(o->model.t));
+  fprintf(f,"%.12g,",(double)(o->model.z));
+  fprintf(f,"%.12g,",(double)(o->model.y));
+  fprintf(f,"%.12g,",(double)(o->model.v));
+  fprintf(f,"%.12g,",(double)(o->model.u));
+  fprintf(f,"%u,",(unsigned)(o->model.ready));
+  fprintf(f,"%u,",(unsigned)(o->model.seeded));
+  fprintf(f,"%.12g,",(double)(o->model.warm_elapsed_s));
+  fprintf(f,"%u,",(unsigned)(o->model.sequence));
+  fprintf(f,"%u,",(unsigned)(o->model.resets));
+  fprintf(f,"%.12g,",(double)(visual_servoing.module_entry_s));
+  fprintf(f,"%.12g,",(double)(visual_servoing.oscillation_onset_s));
+  fprintf(f,"%u,",(unsigned)(visual_servoing.have_oscillation_onset));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_n));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_e));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_height));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_vn));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_ve));
+  fprintf(f,"%.12g,",(double)(visual_servoing.entry_vd));
+}
+
+void logger_file_command_trace(void)
+{
+  if (!command_file) { return; }
+  const struct VsDistanceObserver *o=&vs_distance_observer;
+  const struct NedCoor_f *v=stateGetSpeedNed_f(), *a=stateGetAccelNed_f();
+  fprintf(command_file,"%s,%u,%.9f,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%u,%.12g,%.12g,%.12g,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+    vs_run_id(),(unsigned)VS_EXPERIMENT_CASE_ID,
+    visual_servoing_time_s(visual_servoing.command_stamp_us),
+    (unsigned)visual_servoing.command_stamp_us,(unsigned)visual_servoing.command_sequence,
+    visual_servoing.mu_y_unbounded,visual_servoing.mu_y_control,visual_servoing.mu_y_of,
+    visual_servoing.mu_y_yaw,visual_servoing.mu_y_active,visual_servoing.mu_y_trim,
+    visual_servoing.mu_y,visual_servoing.roll_sp_cmd,
+    (unsigned)visual_servoing.applied_command_valid,(unsigned)visual_servoing.lat_total_limited,
+    (unsigned)visual_servoing.lat_slew_limited,(unsigned)visual_servoing.roll_limited,
+    o->model.z,o->model.y,o->model.v,(unsigned)o->model.ready,
+    v->x,v->y,v->z,a->x,a->y,a->z,stateGetBodyRates_f()->r);
+}
+
+static void logger_metadata(FILE *f)
+{
+  fprintf(f,"key,value\nrun_id,%s\ncase_id,%u\nclock_sync,%u\nx0_m,%.9g\nf_hz,%.9g\nA1_m_s2,%.9g\nA2_m_s2,%.9g\n",
+    vs_run_id(),(unsigned)VS_EXPERIMENT_CASE_ID,(unsigned)NPS_GAZEBO_SYNC_TIME,
+    (double)VS_EXPERIMENT_X0_M,(double)VS_SELF_OSC_FREQ_HZ,(double)VS_SELF_OSC_AMPLITUDE,(double)VS_SELF_OSC_H2_AMPLITUDE);
+  fprintf(f,"L,%.17g\ngamma,%.17g\nc_rel,%.17g\nOF_observer_gain,%.17g\nOE_q,%.17g\nOE_output_gain,%.17g\nR0_m,%.17g\nextra_alignment_s,%.17g\nmodel_delay_s,%.17g\nmodel_gain,%.17g\nmodel_T_s,%.17g\nmodel_slew,%.17g\nmodel_drag,%.17g\nmax_step_s,%.17g\nvision_timeout_s,%.17g\n",
+    (double)VS_OBS_L,(double)VS_OBS_GAMMA,(double)VS_OBS_C_REL,(double)VS_OBS_OF_GAIN,
+    (double)VS_OE_Q,(double)VS_OE_GAIN,(double)VS_OBS_INITIAL_R_M,(double)VS_OBS_ACCEL_ALIGNMENT_S,
+    (double)VS_MODEL_DELAY_S,(double)VS_MODEL_GAIN,(double)VS_MODEL_T_S,(double)VS_MODEL_SLEW,
+    (double)VS_MODEL_DRAG,(double)VS_OBS_MAX_STEP_S,(double)VS_OBS_TIMEOUT_S);
+  fprintf(f,"normalizer_ETA,%.17g\nnormalizer_AO,%.17g\nnormalizer_AA,%.17g\nnormalizer_delay_s,%.17g\nh0_window_s,%.17g\nmodel_quiet_warmup_s,%.17g\n",
+    (double)VS_OBS_ETA,(double)VS_OBS_AO,(double)VS_OBS_AA,(double)VS_OBS_NORMALIZATION_DELAY_S,
+    (double)VS_OBS_H0_WINDOW_S,(double)VS_MODEL_QUIET_WARMUP_S);
+  fprintf(f,"OF_control_gain,%.12g\nyaw_control_gain,%.12g\nOF_pixel_scale,%.12g\nlat_accel_max,%.12g\nlat_accel_slew,%.12g\nroll_max_deg,%.12g\n",
+    (double)visual_servoing.ol_y_OF_gain,(double)visual_servoing.ol_y_YAW_gain,(double)visual_servoing.of_scale,
+    (double)visual_servoing.lat_max_accel,(double)visual_servoing.lat_accel_slew,(double)visual_servoing.max_roll_deg);
+  fputs("build_profile,B54_KF50_NORMAL_20261029\nestimator_time_base,physical_seconds_in_NPS\n",f);
+  fputs("OE_initial_sd,0.5\nOE_derivative_initial_sd,2\ncount_absolute_sd,1\ncount_relative_sd,0.015\ncamera_configured_hz,25\nscan_stride_x,2\nscan_stride_y,2\nstate_epoch_assumption,availability_minus_45ms_not_a_measured_pure_delay\n",f);
+#ifdef SYS_TIME_FREQUENCY
+  fprintf(f,"sys_time_frequency,%u\n",(unsigned)SYS_TIME_FREQUENCY);
+#endif
+#ifdef PERIODIC_FREQUENCY
+  fprintf(f,"periodic_frequency,%u\n",(unsigned)PERIODIC_FREQUENCY);
+#endif
+#ifdef VS_KF3_SIGMA_JERK_PX_S3
+  fprintf(f,"centroid_sigma_jerk,%.12g\ncentroid_initial_OF_sd,%.12g\ncentroid_initial_OFD_sd,%.12g\n",
+    (double)VS_KF3_SIGMA_JERK_PX_S3,(double)VS_KF3_INITIAL_OF_STD_PX_S,(double)VS_KF3_INITIAL_OFD_STD_PX_S2);
+#endif
+}
+
 static void logger_file_write_header(FILE *file)
 {
   fprintf(file, "time,");
@@ -369,6 +547,7 @@ static void logger_file_write_header(FILE *file)
   logger_file_write_camera_fps_header(file);
   logger_file_write_setup_header(file);
   logger_file_write_kf_visual_header(file);
+  logger_observer_header(file);
 
   fprintf(
     file,
@@ -424,6 +603,7 @@ static void logger_file_write_row(FILE *file)
   logger_file_write_camera_fps_row(file);
   logger_file_write_setup_row(file);
   logger_file_write_kf_visual_row(file);
+  logger_observer_row(file);
 
   /*
    * These describe the previous completed logger call; the current
@@ -439,65 +619,32 @@ static void logger_file_write_row(FILE *file)
 
 void logger_file_start(void)
 {
-  logger_file_logger_file_periodic_status = MODULES_RUN;
-
-  if (access(STRINGIFY(LOGGER_FILE_PATH), F_OK)) {
-    char save_dir_cmd[256];
-    sprintf(save_dir_cmd, "mkdir -p %s", STRINGIFY(LOGGER_FILE_PATH));
-
-    if (system(save_dir_cmd) != 0) {
-      printf(
-        "[logger_file] Could not create log file directory %s.\n",
-        STRINGIFY(LOGGER_FILE_PATH)
-      );
-      return;
-    }
+  if (logger_file) { return; }
+  const char *directory=getenv("B54_LOG_DIR");
+  if (!directory || !*directory) { directory=STRINGIFY(LOGGER_FILE_PATH); }
+  if (vs_mkdirs(directory)) { perror("[logger_file] mkdir"); return; }
+  char filename[1400], command_name[1400], metadata_name[1400];
+  unsigned suffix=0;
+  for (;;) {
+    snprintf(filename,sizeof(filename),"%s/%s_pprz_%03u.csv",directory,vs_run_id(),suffix);
+    logger_file=fopen(filename,"wx");
+    if (logger_file || errno!=EEXIST || ++suffix>999) { break; }
   }
-
-  char date_time[80];
-  time_t now = time(0);
-  struct tm tstruct = *localtime(&now);
-
-  strftime(
-    date_time,
-    sizeof(date_time),
-    "%Y%m%d-%H%M%S",
-    &tstruct
-  );
-
-  uint32_t counter = 0U;
-  char filename[512];
-
-  sprintf(
-    filename,
-    "%s/%s.csv",
-    STRINGIFY(LOGGER_FILE_PATH),
-    date_time
-  );
-
-  while ((logger_file = fopen(filename, "r"))) {
-    fclose(logger_file);
-
-    sprintf(
-      filename,
-      "%s/%s_%05d.csv",
-      STRINGIFY(LOGGER_FILE_PATH),
-      date_time,
-      counter
-    );
-
-    counter++;
-  }
-
-  logger_file = fopen(filename, "w");
-
-  if (logger_file == NULL) {
-    printf(
-      "[logger_file] ERROR opening log file %s!\n",
-      filename
-    );
-    return;
-  }
+  if (!logger_file) { perror("[logger_file] open"); return; }
+  snprintf(command_name,sizeof(command_name),"%s/%s_command_%03u.csv",directory,vs_run_id(),suffix);
+  snprintf(metadata_name,sizeof(metadata_name),"%s/%s_metadata_%03u.csv",directory,vs_run_id(),suffix);
+#if VS_COMMAND_TRACE
+  command_file=fopen(command_name,"wx");
+  if (!command_file) { perror("[logger_file] command trace open"); logger_file_stop(); return; }
+  setvbuf(command_file,command_file_buffer,_IOFBF,sizeof(command_file_buffer));
+  fputs("run_id,case_id,time_s,command_us,command_sequence,mu_y_unbounded,mu_y_bounded,mu_y_of,mu_y_yaw,mu_y_active,mu_y_trim,mu_y_final,roll_sp,valid,total_limited,slew_limited,roll_limited,model_z,model_y,model_v,model_ready,vn,ve,vd,an,ae,ad,yaw_rate\n",command_file);
+#endif
+  FILE *metadata=fopen(metadata_name,"wx");
+  if (!metadata) { perror("[logger_file] metadata open"); logger_file_stop(); return; }
+  logger_metadata(metadata); fclose(metadata);
+  logger_file_logger_file_periodic_status=MODULES_RUN;
+  logger_last_flush_s=visual_servoing_time_s(get_sys_time_usec());
+  if (!logger_exit_registered) { atexit(logger_file_stop); logger_exit_registered=true; }
 
   if (setvbuf(
         logger_file,
@@ -527,6 +674,7 @@ void logger_file_start(void)
 
 void logger_file_stop(void)
 {
+  if (command_file) { fclose(command_file); command_file=NULL; }
   if (logger_file != NULL) {
     fclose(logger_file);
     logger_file = NULL;
@@ -539,13 +687,22 @@ void logger_file_periodic(void)
     return;
   }
 
-  const uint32_t write_start_usec =
-    get_sys_time_usec();
+  const uint64_t write_start_usec = vs_profile_us();
 
   logger_file_write_row(logger_file);
+  const double now=visual_servoing_time_s(get_sys_time_usec());
+  if (now-logger_last_flush_s>=1.) {
+    logger_last_flush_s=now;
+    if (fflush(logger_file) || (command_file && fflush(command_file))) {
+      perror("[logger_file] flush"); logger_file_stop(); return;
+    }
+  }
+  if (ferror(logger_file) || (command_file && ferror(command_file))) {
+    perror("[logger_file] write"); logger_file_stop(); return;
+  }
 
   logger_last_write_usec =
-    get_sys_time_usec() - write_start_usec;
+    vs_profile_us() - write_start_usec;
 
   if (logger_last_write_usec >
       logger_max_write_usec) {

@@ -44,6 +44,20 @@ enum VisualServoingActivationState {
 };
 
 struct VisualServoing {
+  /* Capture/receipt/processing use distinct timestamps. Source is retained raw. */
+  uint32_t vision_capture_raw_us, vision_receive_us, vision_process_us;
+  uint32_t previous_capture_raw_us;
+  uint32_t vision_duplicate_count, vision_backward_count, vision_skipped_count;
+  uint32_t vision_accepted_sequence;
+  bool have_vision_stamp;
+  float vision_source_age, vision_receive_age;
+  float shadow_mu_y_of, shadow_mu_y_yaw, observer_yaw_at_capture;
+  float mu_y_unbounded;
+  bool lat_total_limited, lat_slew_limited, roll_limited, applied_command_valid;
+  uint32_t command_stamp_us, command_sequence;
+  double module_entry_s, oscillation_onset_s;
+  bool have_oscillation_onset;
+  float entry_n, entry_e, entry_height, entry_vn, entry_ve, entry_vd;
   float dt;
   float nominal_throttle;
   float mu_x;
@@ -709,4 +723,7 @@ extern void guidance_h_module_enter(void);
 extern void guidance_h_module_run(bool in_flight);
 extern void guidance_h_module_read_rc(void);
 
+void visual_servoing_reset_vision_stream(void);
+bool visual_servoing_experiment_done(void);
+double visual_servoing_time_s(uint32_t stamp_us);
 #endif

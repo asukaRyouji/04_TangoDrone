@@ -12,6 +12,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 #include "math/pprz_stat.h"
 #include "math/pprz_algebra_float.h"
 #include "modules/visual_servoing/visual_servoing.h"
@@ -22,7 +23,16 @@
 #include "firmwares/rotorcraft/stabilization/stabilization_attitude.h"
 #include "firmwares/rotorcraft/stabilization/stabilization_indi_simple.h"
 #include "generated/airframe.h"
+#include "vs_distance_observer.h"
+#include "modules/computer_vision/cv_detect_color_object.h"
+#ifdef VS_SIM_NO_EXT_POSE
+#include "mcu_periph/sim_clock_bridge.h"
+#endif
+#if VS_COMMAND_TRACE
+#include "modules/loggers/logger_file.h"
+#endif
 #include "state.h"
+#include "mcu_periph/sys_time.h"
 #ifndef VS_SIM_NO_EXT_POSE
 #include "modules/ins/ins_ext_pose.h"
 #endif
@@ -345,7 +355,7 @@ static bool visual_servoing_pose_available(void)
  * below is an explicit TEST assumption, not a fitted biological phase.
  */
 #ifndef VS_SELF_OSC_H2_AMPLITUDE
-#define VS_SELF_OSC_H2_AMPLITUDE -0.608f
+#define VS_SELF_OSC_H2_AMPLITUDE 0.0f
 #endif
 #ifndef VS_SELF_OSC_H2_PHASE_RAD
 #define VS_SELF_OSC_H2_PHASE_RAD 0.0f
@@ -588,35 +598,95 @@ static void send_vs_attitude(struct transport_tx *trans, struct link_device *dev
 #error This module requires two color filters, as such you have to define ORANGE_AVOIDER_VISUAL_DETECTION_ID to the orange filter
 #error Please define ORANGE_AVOIDER_VISUAL_DETECTION_ID to be COLOR_OBJECT_DETECTION1_ID or COLOR_OBJECT_DETECTION2_ID in your airframe
 #endif
+/* Wrap-aware system epoch and a short native-rate gyro/command history. */
+static bool vs_clock_initialized, vs_source_initialized, vs_was_module;
+static uint32_t vs_clock_last, vs_source_last;
+static double vs_clock_seconds;
+struct VsContext { double t, yaw, K, command; };
+static struct VsContext vs_context[1024];
+static unsigned vs_context_head, vs_context_count;
+
+double visual_servoing_time_s(uint32_t stamp_us)
+{
+#ifdef VS_SIM_NO_EXT_POSE
+  /* Even the legacy-clock comparison logs estimator time in Gazebo SI seconds. */
+  if (sim_clock_bridge.ready) {
+    const uint32_t pair_us=(uint32_t)(uint64_t)llround(sim_clock_bridge.system_s*1.e6);
+    return sim_clock_bridge.gazebo_s+
+      (int32_t)(stamp_us-pair_us)*1.e-6/sim_clock_bridge.system_per_gazebo;
+  }
+#endif
+  if (!vs_clock_initialized) {
+    vs_clock_initialized=true; vs_clock_last=stamp_us; vs_clock_seconds=stamp_us*1.e-6;
+  } else {
+    const int32_t d=(int32_t)(stamp_us-vs_clock_last);
+    if (d>0) { vs_clock_seconds+=d*1.e-6; vs_clock_last=stamp_us; }
+  }
+  return vs_clock_seconds+(int32_t)(stamp_us-vs_clock_last)*1.e-6;
+}
+static void vs_context_add(double t)
+{
+  const struct VsContext c={t,stateGetBodyRates_f()->r,visual_servoing.ol_y_OF_gain,
+    visual_servoing.applied_command_valid ? visual_servoing.mu_y_control : 0};
+  if (vs_context_count && vs_context[(vs_context_head+1023)%1024].t==t) {
+    vs_context[(vs_context_head+1023)%1024]=c; return;
+  }
+  vs_context[vs_context_head]=c; vs_context_head=(vs_context_head+1)%1024;
+  if (vs_context_count<1024) { vs_context_count++; }
+}
+static bool vs_context_at(double t,struct VsContext *out)
+{
+  if (vs_context_count<2) { return false; }
+  const unsigned first=(vs_context_head+1024-vs_context_count)%1024;
+  struct VsContext a=vs_context[first];
+  if (t<a.t) { return false; }
+  for (unsigned i=1;i<vs_context_count;i++) {
+    const struct VsContext b=vs_context[(first+i)%1024];
+    if (t<=b.t && b.t>a.t) {
+      const double f=(t-a.t)/(b.t-a.t);
+      *out=(struct VsContext){t,a.yaw+f*(b.yaw-a.yaw),a.K+f*(b.K-a.K),
+                             a.command+f*(b.command-a.command)};
+      return true;
+    }
+    a=b;
+  }
+  return false;
+}
+static void vs_range_frame(uint32_t now_us)
+{
+  const double now=visual_servoing_time_s(now_us);
+  const double capture=visual_servoing_time_s(visual_servoing.vision_stamp_us);
+  struct VsContext gyro, command;
+  if (!vs_context_at(capture,&gyro) ||
+      !vs_context_at(capture-VS_OBS_NORMALIZATION_DELAY_S,&command)) { return; }
+  visual_servoing.observer_yaw_at_capture=gyro.yaw;
+  const double F=VS_OBS_OF_GAIN*(-visual_servoing.of_scale*visual_servoing.of_y+gyro.yaw);
+  vs_dobs_frame(&vs_distance_observer,capture,now,visual_servoing.color_count,F,
+                 command.K,command.command);
+  visual_servoing.divergence=vs_distance_observer.oe_output;
+}
+
 static abi_event color_detection_ev;
 
 static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32_t stamp, int16_t pixel_x, int16_t pixel_y,
     int16_t __attribute__((unused)) pixel_width, int16_t __attribute__((unused)) pixel_height,
     int32_t quality, int16_t __attribute__((unused)) extra)
 {
-  /*
-   * The detector currently sends several callbacks containing the
-   * same source-image timestamp. Process each source frame once.
-   */
-  static bool have_previous_source_stamp = false;
-  static uint32_t previous_source_stamp = 0;
-
-  if (have_previous_source_stamp &&
-      stamp == previous_source_stamp) {
+  const int32_t delta=(int32_t)(stamp-vs_source_last);
+  if (vs_source_initialized && delta<=0) {
+    if (!delta) { visual_servoing.vision_duplicate_count++; }
+    else { visual_servoing.vision_backward_count++; }
     return;
   }
-
-  previous_source_stamp = stamp;
-  have_previous_source_stamp = true;
-
-  /*
-   * Use the monotonic onboard receive time for controller timing.
-   *
-   * The detector's source stamp appears to contain only the
-   * microsecond part of the current second and therefore wraps at
-   * approximately 1,000,000.
-   */
-  visual_servoing.vision_stamp_us = get_sys_time_usec();
+  vs_source_last=stamp; vs_source_initialized=true;
+  visual_servoing.vision_capture_raw_us=stamp;
+#ifdef VS_SIM_NO_EXT_POSE
+  visual_servoing.vision_stamp_us=sim_clock_capture_to_sys_us(stamp);
+#else
+  /* Hardware image timestamps must already share the autopilot epoch. */
+  visual_servoing.vision_stamp_us=stamp;
+#endif
+  visual_servoing.vision_receive_us=get_sys_time_usec();
 
   visual_servoing.color_count = (float)quality;
 
@@ -719,6 +789,11 @@ static float visual_servoing_slew(float current, float target, float rate_limit,
  */
 void visual_servoing_module_init(void)
 {
+  memset(&visual_servoing,0,sizeof(visual_servoing));
+  vs_dobs_init(&vs_distance_observer);
+  vs_clock_initialized=vs_source_initialized=vs_was_module=false;
+  vs_context_head=vs_context_count=0;
+
   visual_servoing.dt = 0.065;
   visual_servoing.mu_x = 0;
   visual_servoing.mu_y = 0;
@@ -752,7 +827,7 @@ void visual_servoing_module_init(void)
   visual_servoing.lp_const = VS_LP_CONST;
   visual_servoing.switch_magnitude = VS_SWITCH_MAGNITUDE;
   visual_servoing.switch_decay = VS_SWITCH_DECAY;
-  visual_servoing.distance_est = 10;
+  visual_servoing.distance_est = VS_OBS_INITIAL_R_M;
   visual_servoing.theta_offset = VS_THETA_OFFSET;
   visual_servoing.manual_switching = VS_MANUAL_SWITCHING;
   visual_servoing.approach_mode = VS_APPROACH_MODE;
@@ -875,6 +950,7 @@ void visual_servoing_module_init(void)
   visual_servoing.vision_sequence = 0;
   visual_servoing.processed_vision_sequence = 0;
   visual_servoing.previous_vision_stamp_us = 0;
+  visual_servoing.have_vision_stamp=false;
   visual_servoing.last_valid_vision_rx_us = 0;
   visual_servoing.last_control_time_us = 0;
 
@@ -1062,7 +1138,7 @@ static void reset_all_vars(void)
   visual_servoing.div_err = 0;
   visual_servoing.previous_div_err = 0;
   visual_servoing.div_err_sum = 0;
-  visual_servoing.distance_est = 10;
+  visual_servoing.distance_est = VS_OBS_INITIAL_R_M;
   pitch_sp = 0;
   roll_sp = 0;
 
@@ -1199,6 +1275,10 @@ void visual_servoing_request_start(void)
    * Do not change AP mode here. Standard NAV must continue holding
    * the aircraft while the observer evaluates the conditions.
    */
+  vs_dobs_init(&vs_distance_observer);
+  visual_servoing.have_oscillation_onset=false;
+  visual_servoing.applied_command_valid=false;
+  visual_servoing.have_vision_stamp=false;
   visual_servoing.activation_requested = true;
 
   visual_servoing.activation_state = VS_ACTIVATION_SETTLE;
@@ -1212,6 +1292,7 @@ void visual_servoing_request_start(void)
    */
   visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
   visual_servoing.previous_vision_stamp_us = 0U;
+    visual_servoing.have_vision_stamp=false;
   visual_servoing.last_valid_vision_rx_us = 0U;
   visual_servoing.vision_new_frame = false;
   visual_servoing.vision_valid = false;
@@ -1250,6 +1331,13 @@ void visual_servoing_request_start(void)
 
 void visual_servoing_cancel_request(void)
 {
+  visual_servoing.mu_y_control=0;
+  visual_servoing.applied_command_valid=false;
+  visual_servoing.have_oscillation_onset=false;
+  vs_distance_observer.armed=false;
+  vs_dobs_reset_range(&vs_distance_observer,VS_OBS_MODE_EXIT);
+  vs_model_command(&vs_distance_observer.model,0,0,false,false);
+
   visual_servoing.self_oscillation_phase = 0.0f;
   visual_servoing.mu_y_active = 0.0f;
   /*
@@ -1338,6 +1426,11 @@ static float visual_servoing_slew(float current, float target, float rate_limit,
 
 static void visual_servoing_reset_of_state(void)
 {
+  vs_distance_observer.have_oe_time=false;
+  vs_distance_observer.oe.initialized=0;
+  vs_distance_observer.of_head=vs_distance_observer.of_count=0;
+  vs_dobs_reset_range(&vs_distance_observer,VS_OBS_VISION_GAP);
+
   visual_servoing.raw_of_y = 0.0f;
   visual_servoing.of_y = 0.0f;
 
@@ -1827,6 +1920,7 @@ static void visual_servoing_capture_reference(void)
 
     visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
     visual_servoing.previous_vision_stamp_us = 0U;
+    visual_servoing.have_vision_stamp=false;
     visual_servoing.last_valid_vision_rx_us = 0U;
     visual_servoing.vision_new_frame = false;
     visual_servoing.vision_valid = false;
@@ -1889,6 +1983,9 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
   /*
    * Claim this sample exactly once.
    */
+  const uint32_t skipped=visual_servoing.vision_sequence-visual_servoing.processed_vision_sequence;
+  if (skipped>1) { visual_servoing.vision_skipped_count+=skipped-1; }
+  visual_servoing.vision_process_us=now_us;
   visual_servoing.processed_vision_sequence = visual_servoing.vision_sequence;
 
   visual_servoing.vision_new_frame = true;
@@ -1900,7 +1997,9 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
    * baseline. It cannot provide optic flow because no previous
    * post-entry target sample exists.
    */
-  if (visual_servoing.previous_vision_stamp_us == 0) {
+  if (!visual_servoing.have_vision_stamp) {
+    visual_servoing.have_vision_stamp=true;
+    visual_servoing.previous_capture_raw_us=visual_servoing.vision_capture_raw_us;
     visual_servoing.previous_vision_stamp_us = current_stamp_us;
 
     visual_servoing.vision_valid = false;
@@ -1914,11 +2013,17 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
    * Unsigned subtraction also behaves correctly through a normal
    * uint32 timestamp wrap.
    */
-  const uint32_t frame_dt_us = current_stamp_us - visual_servoing.previous_vision_stamp_us;
+  const int32_t signed_frame_dt=(int32_t)(current_stamp_us-visual_servoing.previous_vision_stamp_us);
+  if (signed_frame_dt<=0) { visual_servoing.vision_backward_count++; return; }
+  const uint32_t frame_dt_us=(uint32_t)signed_frame_dt;
 
   visual_servoing.previous_vision_stamp_us = current_stamp_us;
 
   visual_servoing.vision_dt = 1.0e-6f * (float)frame_dt_us;
+#ifdef VS_SIM_NO_EXT_POSE
+  visual_servoing.vision_dt=1.e-6f*(uint32_t)(visual_servoing.vision_capture_raw_us-visual_servoing.previous_capture_raw_us);
+  visual_servoing.previous_capture_raw_us=visual_servoing.vision_capture_raw_us;
+#endif
 
   /*
    * Keep the legacy dt field synchronized for telemetry and
@@ -1947,7 +2052,9 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
    */
   const bool valid_target = valid_dt
     && isfinite(visual_servoing.box_centroid_y)
-    && visual_servoing.color_count >= visual_servoing.color_count_threshold;
+    && visual_servoing.color_count >= visual_servoing.color_count_threshold
+    && (int32_t)(now_us-current_stamp_us)>=0
+    && visual_servoing_time_s(now_us)-visual_servoing_time_s(current_stamp_us)<=visual_servoing.vision_timeout;
 
   if (!valid_target) {
     visual_servoing.vision_valid = false;
@@ -1963,7 +2070,8 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
    * Use onboard time to monitor how long control has gone without
    * a valid accepted target sample.
    */
-  visual_servoing.last_valid_vision_rx_us = now_us;
+  visual_servoing.last_valid_vision_rx_us = visual_servoing.vision_receive_us;
+  visual_servoing.vision_accepted_sequence++;
 
   /*
    * First valid target after startup or target loss:
@@ -1983,6 +2091,7 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
     visual_servoing.of_ready = false;
 
     visual_servoing_kf_warmup_note_valid_frame(now_us);
+    vs_range_frame(now_us);
 
     return;
   }
@@ -2038,6 +2147,7 @@ static void visual_servoing_process_new_vision_sample(uint32_t now_us)
   visual_servoing.of_ready = visual_servoing.vision_valid_streak >= visual_servoing.vision_min_streak;
 
   visual_servoing_kf_warmup_note_valid_frame(now_us);
+  vs_range_frame(now_us);
 }
 
 static void visual_servoing_update_activation(uint32_t now_us)
@@ -2323,7 +2433,8 @@ static void visual_servoing_update_activation(uint32_t now_us)
   if (!visual_servoing.roll_trim_average_valid ||
       !visual_servoing.kf_warmup_ready ||
       !visual_servoing.of_ready ||
-      !visual_servoing.vision_valid)
+      !visual_servoing.vision_valid ||
+      !vs_distance_observer.model.ready)
   {
       return;
   }
@@ -2363,6 +2474,24 @@ static void visual_servoing_update_activation(uint32_t now_us)
 void visual_servoing_observer_periodic(void)
 {
   const uint32_t now_us = get_sys_time_usec();
+  const double now=visual_servoing_time_s(now_us);
+  const bool module=guidance_h.mode==GUIDANCE_H_MODE_MODULE;
+  if (!module) {
+    visual_servoing.applied_command_valid=false;
+    if (vs_was_module) {
+      vs_distance_observer.armed=false;
+      vs_dobs_reset_range(&vs_distance_observer,VS_OBS_MODE_EXIT);
+    }
+    const struct NedCoor_f *v=stateGetSpeedNed_f(), *p=stateGetPositionNed_f();
+    const bool quiet=visual_servoing.activation_requested && visual_servoing_pose_available() &&
+      hypotf(v->x,v->y)<0.03f && fabsf(v->z)<0.03f &&
+      hypotf(p->x-visual_servoing.settle_ref_n,p->y-visual_servoing.settle_ref_e)<0.05f &&
+      fabsf(-p->z-visual_servoing.settle_ref_height)<0.05f;
+    vs_model_command(&vs_distance_observer.model,now,0,quiet,true);
+  }
+  vs_was_module=module;
+  vs_context_add(now);
+
 
   /*
    * Process each VISUAL_DETECTION callback at most once.
@@ -2379,16 +2508,20 @@ void visual_servoing_observer_periodic(void)
   if (visual_servoing.last_valid_vision_rx_us == 0U) {
     visual_servoing.vision_age = 1000.0f;
   } else {
-    visual_servoing.vision_age = 1.0e-6f * (float)(now_us - visual_servoing.last_valid_vision_rx_us);
+    visual_servoing.vision_age = (float)(now-visual_servoing_time_s(visual_servoing.vision_stamp_us));
   }
 
   /*
    * Never retain stale optic flow after target loss or a long
    * visual-processing gap.
    */
+  visual_servoing.vision_source_age=visual_servoing.vision_age;
+  visual_servoing.vision_receive_age=(float)(now-visual_servoing_time_s(visual_servoing.vision_receive_us));
   if (visual_servoing.vision_age > visual_servoing.vision_timeout) {
+    if (visual_servoing.vision_valid || visual_servoing.kf_initialized) {
+      visual_servoing_reset_of_state();
+    }
     visual_servoing.vision_valid = false;
-    visual_servoing_reset_of_state();
   }
 
   /*
@@ -2456,21 +2589,14 @@ void visual_servoing_observer_periodic(void)
    */
   visual_servoing_update_activation(now_us);
 
-  /*
-   * Shadow-mode candidate terms.
-   *
-   * These diagnostics are calculated in every horizontal mode, but
-   * this observer never applies them to the aircraft.
-   */
-  const struct FloatRates *rates = stateGetBodyRates_f();
-
-  visual_servoing.yaw_vel = rates->r;
-
-  visual_servoing.of_scaled = visual_servoing.of_scale * visual_servoing.of_y;
-
-  visual_servoing.mu_y_of = -visual_servoing.ol_y_OF_gain * visual_servoing.of_scaled;
-
-  visual_servoing.mu_y_yaw = visual_servoing.ol_y_YAW_gain * visual_servoing.yaw_vel;
+  /* Keep candidate diagnostics distinct from applied controller components. */
+  const struct FloatRates *rates=stateGetBodyRates_f();
+  visual_servoing.of_scaled=visual_servoing.of_scale*visual_servoing.of_y;
+  visual_servoing.yaw_vel=rates->r;
+  visual_servoing.shadow_mu_y_of=-visual_servoing.ol_y_OF_gain*visual_servoing.of_scale*visual_servoing.of_y;
+  visual_servoing.shadow_mu_y_yaw=visual_servoing.ol_y_YAW_gain*rates->r;
+  vs_dobs_propagate(&vs_distance_observer,now);
+  visual_servoing.distance_est=vs_distance_observer.range_m;
 
 }
 
@@ -2830,6 +2956,11 @@ void visual_servoing_module_run(bool in_flight)
       const float h1 = VS_SELF_OSC_AMPLITUDE * cosf(phi);
       const float h2 = VS_SELF_OSC_H2_AMPLITUDE *
                        cosf(2.0f * phi + VS_SELF_OSC_H2_PHASE_RAD);
+      if (!visual_servoing.have_oscillation_onset) {
+        visual_servoing.have_oscillation_onset=true;
+        visual_servoing.oscillation_onset_s=visual_servoing_time_s(now_us);
+        vs_dobs_arm(&vs_distance_observer,visual_servoing.oscillation_onset_s);
+      }
       visual_servoing.mu_y_active = h1 + h2;
       visual_servoing.mu_y_control += visual_servoing.mu_y_active;
     }
@@ -2860,12 +2991,21 @@ void visual_servoing_module_run(bool in_flight)
   }
 
   /* ONE total OF+yaw+H1+H2 acceleration bound and ONE lateral slew limiter. */
+  visual_servoing.mu_y_unbounded=visual_servoing.mu_y_control;
   Bound(visual_servoing.mu_y_control,
         -visual_servoing.lat_max_accel, visual_servoing.lat_max_accel);
+  visual_servoing.lat_total_limited=visual_servoing.mu_y_unbounded!=visual_servoing.mu_y_control;
+  visual_servoing.applied_command_valid=in_flight && visual_servoing.pose_ok;
+  visual_servoing.command_stamp_us=now_us;
+  visual_servoing.command_sequence++;
+  vs_model_command(&vs_distance_observer.model,visual_servoing_time_s(now_us),
+      visual_servoing.mu_y_control,visual_servoing.applied_command_valid,false);
+  vs_context_add(visual_servoing_time_s(now_us));
   visual_servoing.mu_y_target = visual_servoing.mu_y_trim + visual_servoing.mu_y_control;
   visual_servoing.mu_y = visual_servoing_slew(
       visual_servoing.mu_y, visual_servoing.mu_y_target,
       visual_servoing.lat_accel_slew, control_dt);
+  visual_servoing.lat_slew_limited=fabsf(visual_servoing.mu_y-visual_servoing.mu_y_target)>1.e-6f;
 
   /*
    * ============================================================
@@ -2912,6 +3052,7 @@ void visual_servoing_module_run(bool in_flight)
    */
   BoundAbs(pitch_sp, RadOfDeg(visual_servoing.max_pitch_deg));
 
+  visual_servoing.roll_limited=fabsf(roll_sp)>RadOfDeg(visual_servoing.max_roll_deg);
   BoundAbs(roll_sp, RadOfDeg(visual_servoing.max_roll_deg));
 
   visual_servoing.pitch_sp_cmd = pitch_sp;
@@ -2919,6 +3060,9 @@ void visual_servoing_module_run(bool in_flight)
   visual_servoing.roll_sp_cmd = roll_sp;
 
   visual_servoing.yaw_sp_cmd = visual_servoing.heading_ref;
+#if VS_COMMAND_TRACE
+  logger_file_command_trace();
+#endif
 
   /*
    * ============================================================
@@ -3373,6 +3517,12 @@ void guidance_h_module_init(void)
 
 void guidance_h_module_enter(void)
 {
+  visual_servoing.module_entry_s=visual_servoing_time_s(get_sys_time_usec());
+  const struct NedCoor_f *p=stateGetPositionNed_f(), *v=stateGetSpeedNed_f();
+  visual_servoing.entry_n=p->x; visual_servoing.entry_e=p->y; visual_servoing.entry_height=-p->z;
+  visual_servoing.entry_vn=v->x; visual_servoing.entry_ve=v->y; visual_servoing.entry_vd=v->z;
+  visual_servoing.have_oscillation_onset=false;
+
   /*
    * Capture the actual visual-servo reference only now, after the
    * settle gate has completed and Paparazzi has selected MODULE.
@@ -3402,4 +3552,21 @@ void guidance_h_module_run(bool in_flight)
 {
   // Call full inner-/outerloop / horizontal-/vertical controller:
   visual_servoing_module_run(in_flight);
+}
+/* Explicit camera reset. A single out-of-order frame never silently resets the stream. */
+void visual_servoing_reset_vision_stream(void)
+{
+  color_object_detector_reset_stream();
+  vs_source_initialized=false;
+  visual_servoing.have_vision_stamp=false;
+  visual_servoing.processed_vision_sequence=visual_servoing.vision_sequence;
+  visual_servoing_reset_of_state();
+}
+bool visual_servoing_experiment_done(void)
+{
+  const double now=visual_servoing_time_s(get_sys_time_usec());
+  if (visual_servoing.have_oscillation_onset) {
+    return now-visual_servoing.oscillation_onset_s>=60.;
+  }
+  return now-visual_servoing.module_entry_s>=75.;
 }

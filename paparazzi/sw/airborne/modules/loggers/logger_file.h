@@ -30,5 +30,6 @@
 extern void logger_file_start(void);
 extern void logger_file_stop(void);
 extern void logger_file_periodic(void);
+extern void logger_file_command_trace(void);
 
 #endif /* LOGGER_FILE_H_ */

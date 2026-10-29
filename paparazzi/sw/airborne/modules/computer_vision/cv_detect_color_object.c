@@ -34,6 +34,7 @@
 #include "mcu_periph/sys_time.h"
 
 #include <sys/time.h>
+#include <time.h>
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -88,6 +89,14 @@ uint32_t cod_gate_dt_us = 0U;
 uint32_t cod_backward_ts_count = 0U;
 
 static uint32_t cod_last_input_ts_us = 0U;
+static bool cod_have_input, cod_have_processed;
+
+static uint64_t cod_profile_us(void)
+{
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (uint64_t)t.tv_sec * 1000000ULL + t.tv_nsec / 1000U;
+}
 
 #define COD_MIN_FRAME_INTERVAL_US 33000U
 
@@ -123,7 +132,7 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter, uint
   uint8_t cr_min, cr_max;
   bool draw;
 
-  const uint32_t cod_start_us = get_sys_time_usec();
+  const uint64_t cod_start_us = cod_profile_us();
 
   switch (filter){
     case 1:
@@ -164,7 +173,7 @@ static struct image_t *object_detector(struct image_t *img, uint8_t filter, uint
   global_filters[filter-1].ts = time_stamp;
   pthread_mutex_unlock(&mutex);
 
-  const uint32_t cod_end_us = get_sys_time_usec();
+  const uint64_t cod_end_us = cod_profile_us();
 
   cod_exec_time_us = cod_end_us - cod_start_us;
 
@@ -190,32 +199,26 @@ struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attrib
 
     cod_input_count++;
 
-    if (cod_last_input_ts_us != 0U) {
-        if (img_ts_us < cod_last_input_ts_us) {
-            cod_backward_ts_count++;
-        }
-
-        cod_input_dt_us = (uint32_t)(img_ts_us - cod_last_input_ts_us);
+    const int32_t input_delta = (int32_t)(img_ts_us - cod_last_input_ts_us);
+    if (cod_have_input) {
+        cod_input_dt_us = input_delta > 0 ? (uint32_t)input_delta : 0U;
+        if (input_delta < 0) { cod_backward_ts_count++; }
     }
-
-    cod_last_input_ts_us = img_ts_us;
-
-    if (cod_last_processed_frame_ts_us == 0U) {
-        cod_gate_dt_us = 0U;
-
+    /* Keep the last forward input; an old frame must not move the gate backward. */
+    if (!cod_have_input || input_delta > 0) {
+        cod_last_input_ts_us = img_ts_us;
+        cod_have_input = true;
+    }
+    const int32_t delta = (int32_t)(img_ts_us - cod_last_processed_frame_ts_us);
+    cod_gate_dt_us = cod_have_processed && delta > 0 ? (uint32_t)delta : 0U;
+    if ((!cod_have_processed || delta >= (int32_t)COD_MIN_FRAME_INTERVAL_US) &&
+        (!cod_have_processed || delta > 0)) {
         cod_last_processed_frame_ts_us = img_ts_us;
+        cod_have_processed = true;
         cod_accept_count++;
         process_this_frame = true;
     } else {
-        cod_gate_dt_us = (uint32_t)(img_ts_us - cod_last_processed_frame_ts_us);
-
-        if (cod_gate_dt_us >= COD_MIN_FRAME_INTERVAL_US) {
-            cod_last_processed_frame_ts_us = img_ts_us;
-            cod_accept_count++;
-            process_this_frame = true;
-        } else {
-            cod_reject_count++;
-        }
+        cod_reject_count++;
     }
 
     pthread_mutex_unlock(&mutex);
@@ -233,6 +236,14 @@ struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attrib
 //   return object_detector(img, 2);
 // }
 
+void color_object_detector_reset_stream(void)
+{
+  pthread_mutex_lock(&mutex);
+  cod_have_input = cod_have_processed = false;
+  global_filters[0].updated = global_filters[1].updated = false;
+  pthread_mutex_unlock(&mutex);
+}
+
 void color_object_detector_init(void)
 {
   memset(global_filters, 0, 2 * sizeof(struct color_object_t));
@@ -248,6 +259,7 @@ void color_object_detector_init(void)
 
   cod_last_input_ts_us = 0U;
   cod_last_processed_frame_ts_us = 0U;
+  cod_have_input = cod_have_processed = false;
 
   /*
   * Do not reset this one.

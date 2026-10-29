@@ -65,5 +65,7 @@ extern bool cod_draw2;
 // Module functions
 extern void color_object_detector_init(void);
 extern void color_object_detector_periodic(void);
+/* Call after a camera stream restart; backward frames otherwise remain rejected. */
+extern void color_object_detector_reset_stream(void);
 
 #endif /* COLOR_OBJECT_DETECTOR_CV_H */

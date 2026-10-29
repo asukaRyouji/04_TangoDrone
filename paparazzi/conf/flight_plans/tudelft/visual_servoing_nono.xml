@@ -5,6 +5,7 @@
     #include "modules/datalink/datalink.h"
     #include "modules/ins/ins_ext_pose.h"
     #include "modules/visual_servoing/visual_servoing.h"
+    #include "modules/loggers/logger_file.h"
     #include "modules/nav/waypoints.h"
     #include "modules/energy/electrical.h"
     #include "modules/radio_control/radio_control.h"
@@ -32,13 +33,14 @@ inline void requestVisualServo(void)
    * The observer keeps NAV running until the velocity gate has
    * remained valid for the full dwell time.
    */
+  logger_file_start();
   visual_servoing_request_start();
 }
 
 </header>
   <waypoints>
     <waypoint lat="51.990634" lon="4.376789" name="HOME"/>
-    <waypoint name="2" x="-0.30" y="0.0" height="1."/>
+    <waypoint name="2" x="-0.3" y="0.0" height="1.0"/>
     <waypoint name="3" x="0.5" y="1.0" height="1.5"/>
     <waypoint name="4" x="-0.5" y="0.0" height="1."/>
     <waypoint name="CLIMB" x="-0.3" y="0.0"/>
@@ -143,10 +145,13 @@ inline void requestVisualServo(void)
       -->
       <exception
         cond="visual_servoing_is_active()"
-        deroute="VS active 15 s"/>
+        deroute="VS active 60 s"/>
 
       <call_once fun="NavSetWaypointHere(WP_STDBY)"/>
 
+      <!-- First establish exactly the same target that SETTLE will hold/capture. -->
+      <call_once fun="setNav()"/>
+      <go wp="2"/>
       <!-- Arm the settle gate; this does not switch the mode. -->
       <call_once fun="requestVisualServo()"/>
 
@@ -158,7 +163,7 @@ inline void requestVisualServo(void)
 
     </block>
 
-    <block name="VS active 15 s">
+    <block name="VS active 60 s">
 
       <!--
         Abort only after a sustained localization failure.
@@ -169,7 +174,7 @@ inline void requestVisualServo(void)
         cond="visual_servoing_pose_loss_too_long()"
         deroute="Standby"/>
 
-      <while cond="LessThan(NavBlockTime(), 60.0)"/>
+      <while cond="!visual_servoing_experiment_done()"/>
 
       <!-- Capture current position before handing back to NAV. -->
       <call_once fun="NavSetWaypointHere(WP_STDBY)"/>

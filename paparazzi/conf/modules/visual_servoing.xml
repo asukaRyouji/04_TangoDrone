@@ -251,6 +251,8 @@
   
   <makefile target="ap|nps">
     <file name="visual_servoing.c"/>
+    <file name="vs_count_oe_kf.c"/>
+    <file name="vs_distance_observer.c"/>
     <define name="VISUAL_SERVOING_CAMERA" value="front_camera"/>
   </makefile>
 </module>
