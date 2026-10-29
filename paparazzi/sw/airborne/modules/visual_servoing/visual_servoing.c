@@ -343,11 +343,11 @@ static bool visual_servoing_pose_available(void)
 #endif
 
 #ifndef VS_SELF_OSC_FREQ_HZ
-#define VS_SELF_OSC_FREQ_HZ 0.53f
+#define VS_SELF_OSC_FREQ_HZ 0.80f
 #endif
 /* Peak additional lateral acceleration, NOT displacement amplitude [m/s^2]. */
 #ifndef VS_SELF_OSC_AMPLITUDE
-#define VS_SELF_OSC_AMPLITUDE 1.123f
+#define VS_SELF_OSC_AMPLITUDE 0.56f
 #endif
 /* Additional second acceleration harmonic at exactly 2*f_H1 [m/s^2].
  * Set this amplitude to 0.0f for a matched H1-only comparison.

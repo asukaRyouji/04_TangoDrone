@@ -161,16 +161,18 @@ void vs_dobs_arm(struct VsDistanceObserver *s,double onset_s)
   if (!s->armed) { s->armed=true; s->onset_s=onset_s; s->reason=VS_OBS_WAIT_MODEL; }
 }
 
-static bool of_at(const struct VsDistanceObserver *s,double t,double *F)
+static bool visual_at(const struct VsDistanceObserver *s,double t,bool oe,double *value)
 {
   if (s->of_count<2) { return false; }
   const unsigned first=(s->of_head+VS_OF_RING_SIZE-s->of_count)%VS_OF_RING_SIZE;
   struct VsTimedValue a=s->of_history[first];
+  if (oe) { a=s->oe_history[first]; }
   if (t<a.t) { return false; }
   for (unsigned i=1;i<s->of_count;i++) {
-    const struct VsTimedValue b=s->of_history[(first+i)%VS_OF_RING_SIZE];
+    const struct VsTimedValue b=oe ? s->oe_history[(first+i)%VS_OF_RING_SIZE]
+                                  : s->of_history[(first+i)%VS_OF_RING_SIZE];
     if (t<=b.t && b.t>a.t) {
-      *F=a.value+(b.value-a.value)*(t-a.t)/(b.t-a.t); return true;
+      *value=a.value+(b.value-a.value)*(t-a.t)/(b.t-a.t); return true;
     }
     a=b;
   }
@@ -202,16 +204,19 @@ void vs_dobs_frame(struct VsDistanceObserver *s,double t,double available,double
     s->of_count=s->of_head=0; vs_dobs_reset_range(s,VS_OBS_VISION_GAP);
   }
   s->of_history[s->of_head]=(struct VsTimedValue){t,F};
+  s->oe_history[s->of_head]=(struct VsTimedValue){t,s->oe_output};
   s->of_head=(s->of_head+1)%VS_OF_RING_SIZE;
   if (s->of_count<VS_OF_RING_SIZE) { s->of_count++; }
   s->frames++; s->last_frame_s=t;
   if (!s->armed || t<s->onset_s) { s->reason=VS_OBS_WAIT_ONSET; return; }
-  double old_F;
-  if (!of_at(s,t-VS_OBS_NORMALIZATION_DELAY_S,&old_F)) {
+  double old_F,aligned_F,aligned_E;
+  if (!visual_at(s,t-VS_OBS_NORMALIZATION_DELAY_S,false,&old_F) ||
+      !visual_at(s,t-VS_OBS_OF_BUFFER_S,false,&aligned_F) ||
+      !visual_at(s,t-VS_OBS_OE_BUFFER_S,true,&aligned_E)) {
     vs_dobs_reset_range(s,VS_OBS_WAIT_HISTORY); return;
   }
-  /* Preserve the uncalibrated original frontend g at its fixed 45 ms epoch.
-   * The observer-only OF gain must not also rescale these normalizers. */
+  /* The dynamics and command-model inputs share the declared visual epoch.
+   * The normalizer keeps its original command-minus-K*g definition. */
   const double g=old_F/VS_OBS_OF_GAIN, U=command-K*g;
   if (available-t>VS_OBS_TIMEOUT_S) {
     vs_dobs_reset_range(s,VS_OBS_VISION_GAP); return;
@@ -222,7 +227,7 @@ void vs_dobs_frame(struct VsDistanceObserver *s,double t,double available,double
     vs_dobs_reset_range(s,VS_OBS_WAIT_MODEL); return;
   }
   if (!s->started) {
-    if (!past_mean(s,t,&s->initial_h)) { s->reason=VS_OBS_WAIT_HISTORY; return; }
+    if (!past_mean(s,t-VS_OBS_OF_BUFFER_S,&s->initial_h)) { s->reason=VS_OBS_WAIT_HISTORY; return; }
     s->base_h=s->initial_h; s->base_rho=1./VS_OBS_INITIAL_R_M;
     s->base_t=t; s->started=true; s->timed_out=false;
   } else {
@@ -230,7 +235,7 @@ void vs_dobs_frame(struct VsDistanceObserver *s,double t,double available,double
                       VS_OBS_MAX_STEP_S,&s->integration_steps);
     s->base_t=t;
   }
-  s->held=(struct VsObserverInput){F,s->oe_output,A,K,g,U};
+  s->held=(struct VsObserverInput){aligned_F,aligned_E,A,K,g,U};
   vs_dobs_propagate(s,available);
 }
 

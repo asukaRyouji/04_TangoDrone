@@ -65,7 +65,7 @@
       <pose>0.0 1.0 1.1 0 0 -1.571</pose>
     </include>
 
-    <plugin name="pose_logger" filename="libpose_logger_plugin.so">
+    <plugin name="pose_logger" filename="/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/pose_logger_plugin/build/libpose_logger_plugin.so">
       <drone_model_name>bebop</drone_model_name>
       <flower_model_name>moving_flower</flower_model_name>
       <log_path>/home/admin_user/Desktop/Active_1029/data_gzb</log_path>

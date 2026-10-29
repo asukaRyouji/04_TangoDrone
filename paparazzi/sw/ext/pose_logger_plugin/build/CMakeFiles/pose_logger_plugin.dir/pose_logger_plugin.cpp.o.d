@@ -2592,4 +2592,5 @@ CMakeFiles/pose_logger_plugin.dir/pose_logger_plugin.cpp.o: \
  /usr/include/gazebo-11/gazebo/physics/SphereShape.hh \
  /usr/include/gazebo-11/gazebo/physics/SurfaceParams.hh \
  /usr/include/gazebo-11/gazebo/physics/UniversalJoint.hh \
- /usr/include/gazebo-11/gazebo/physics/UserCmdManager.hh
+ /usr/include/gazebo-11/gazebo/physics/UserCmdManager.hh \
+ /home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/ext/pose_logger_plugin/../../airborne/modules/visual_servoing/vs_log_utils.h

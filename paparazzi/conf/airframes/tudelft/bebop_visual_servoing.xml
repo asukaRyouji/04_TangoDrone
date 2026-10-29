@@ -34,11 +34,10 @@
       <define name="VS_COMMAND_TRACE" value="1"/>
       <define name="VS_EXPERIMENT_CASE_ID" value="5"/>
       <define name="VS_EXPERIMENT_X0_M" value="-0.1"/>
-      <define name="VS_SELF_OSC_FREQ_HZ" value="0.53"/>
-      <define name="VS_SELF_OSC_AMPLITUDE" value="1.123"/>
+      <define name="VS_SELF_OSC_FREQ_HZ" value="0.80"/>
+      <define name="VS_SELF_OSC_AMPLITUDE" value="0.56"/>
       <define name="VS_SELF_OSC_H2_AMPLITUDE" value="0.0"/>
       <define name="VS_SELF_OSC_H2_PHASE_RAD" value="0.0"/>
-      <define name="VS_OBS_ACCEL_ALIGNMENT_S" value="0.045"/>
       <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
       <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
       <!-- Convert the old centroid KF prior/noise units once to physical seconds. -->

@@ -2750,7 +2750,8 @@ CMakeFiles/pose_logger_plugin.dir/pose_logger_plugin.cpp.o: ../pose_logger_plugi
   /usr/include/gazebo-11/gazebo/physics/SphereShape.hh \
   /usr/include/gazebo-11/gazebo/physics/SurfaceParams.hh \
   /usr/include/gazebo-11/gazebo/physics/UniversalJoint.hh \
-  /usr/include/gazebo-11/gazebo/physics/UserCmdManager.hh
+  /usr/include/gazebo-11/gazebo/physics/UserCmdManager.hh \
+  /home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/airborne/modules/visual_servoing/vs_log_utils.h
 
 
 /usr/include/gazebo-11/gazebo/physics/UniversalJoint.hh:
@@ -5054,6 +5055,8 @@ CMakeFiles/pose_logger_plugin.dir/pose_logger_plugin.cpp.o: ../pose_logger_plugi
 /usr/include/x86_64-linux-gnu/bits/waitflags.h:
 
 /usr/include/x86_64-linux-gnu/bits/socket_type.h:
+
+/home/admin_user/Desktop/04_TangoDrone/paparazzi/sw/airborne/modules/visual_servoing/vs_log_utils.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct___jmp_buf_tag.h:
 

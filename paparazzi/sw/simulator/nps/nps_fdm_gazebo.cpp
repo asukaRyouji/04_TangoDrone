@@ -61,7 +61,12 @@ extern "C" {
 #include "math/pprz_geodetic_float.h"
 #include "math/pprz_geodetic_double.h"
 #include "state.h"
+#include "mcu_periph/sim_clock_bridge.h"
 }
+
+#ifndef NPS_GAZEBO_SYNC_TIME
+#define NPS_GAZEBO_SYNC_TIME 0
+#endif
 
 #if defined(NPS_DEBUG_VIDEO)
 // Opencv tools
@@ -282,6 +287,9 @@ void nps_fdm_run_step(
 
   // Update the simulation for a single timestep.
   gazebo::runWorld(model->GetWorld(), 1);
+  // Pair clocks before sensor/video callbacks map Gazebo capture timestamps.
+  sim_clock_pair_update(model->GetWorld()->SimTime().Double(),
+                        model->GetWorld()->Physics()->GetMaxStepSize());
   gazebo::sensors::run_once();
   gazebo_write(act_commands, commands_nb);
   gazebo_read();
@@ -442,6 +450,14 @@ static void init_gazebo(void)
     cout << "Failed to open world, exiting." << endl;
     std::exit(-1);
   }
+
+#if NPS_GAZEBO_SYNC_TIME
+  // Honour the already configured NPS clock switch at the physics boundary.
+  world->Physics()->SetMaxStepSize(fdm.curr_dt);
+#endif
+  cout << "NPS Gazebo clock: sync=" << NPS_GAZEBO_SYNC_TIME
+       << ", physics_dt=" << world->Physics()->GetMaxStepSize()
+       << ", NPS_dt=" << fdm.curr_dt << endl;
 
   cout << "Get pointer to aircraft: " << NPS_GAZEBO_AC_NAME << endl;
   model = world->ModelByName(NPS_GAZEBO_AC_NAME);

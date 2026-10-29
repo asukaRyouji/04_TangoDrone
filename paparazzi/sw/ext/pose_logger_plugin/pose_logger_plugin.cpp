@@ -10,6 +10,9 @@
 #include <ctime>
 #include <sstream>
 #include <cmath>
+#include <cstring>
+
+#include "../../airborne/modules/visual_servoing/vs_log_utils.h"
 
 namespace gazebo
 {
@@ -46,6 +49,14 @@ public:
 
     if (_sdf->HasElement("log_rate"))
       this->logRate = _sdf->Get<double>("log_rate");
+
+    // Create the SDF-configured output directory before opening the CSV.
+    if (vs_mkdirs(this->logDirectory.c_str()) != 0)
+    {
+      gzerr << "[PoseLoggerPlugin] Failed to create log directory: "
+            << this->logDirectory << " (" << std::strerror(errno) << ")\n";
+      return;
+    }
 
     // Generate timestamped filename
     std::time_t now_c = std::time(nullptr);
@@ -92,6 +103,7 @@ public:
 
     this->lastLogTime = this->world->SimTime();
     this->logPeriod = (this->logRate > 0.0) ? 1.0 / this->logRate : 0.01;
+    this->nextLogTime = this->lastLogTime.Double() + this->logPeriod;
 
     this->updateConnection = event::Events::ConnectWorldUpdateBegin(
       std::bind(&PoseLoggerPlugin::OnUpdate, this));
@@ -119,12 +131,24 @@ private:
       return;
 
     common::Time now = this->world->SimTime();
-    const double dt = (now - this->lastLogTime).Double();
+    const double now_s = now.Double();
+    // Restart the schedule if simulation time was reset backwards.
+    if (now_s < this->lastLogTime.Double())
+    {
+      this->lastLogTime = now;
+      this->nextLogTime = now_s + this->logPeriod;
+      return;
+    }
 
-    if (dt < this->logPeriod)
+    if (now_s + 1.e-9 < this->nextLogTime)
       return;
 
     this->lastLogTime = now;
+    // Advance scheduled deadlines, not the rounded time of this write.
+    // Skip missed deadlines after a time jump; never duplicate a pose row.
+    const double late = std::fmax(0.0, now_s - this->nextLogTime);
+    this->nextLogTime += (std::floor((late + 1.e-9) / this->logPeriod) + 1.0)
+                       * this->logPeriod;
 
     ignition::math::Pose3d dronePose = this->droneModel->WorldPose();
     ignition::math::Vector3d droneVel = this->droneModel->WorldLinearVel();
@@ -177,6 +201,7 @@ private:
 
   double logRate = 100.0;
   double logPeriod = 0.01;
+  double nextLogTime = 0.0;
   common::Time lastLogTime;
 };
 

@@ -25,6 +25,7 @@ struct VsDistanceObserver {
   struct VsModel model;
   struct VsObserverInput held;
   struct VsTimedValue of_history[VS_OF_RING_SIZE];
+  struct VsTimedValue oe_history[VS_OF_RING_SIZE];
   unsigned of_head, of_count;
   double oe_time, oe_innovation, oe_variance, oe_output;
   double base_h, base_rho, base_t, h, rho, range_m, initial_h;
