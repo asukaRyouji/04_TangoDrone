@@ -98,12 +98,12 @@
 
       <define 
         name="OL_Y_OF_GAIN" 
-        value="5.8" 
+        value="4.0" 
         description="outer loop y optic flow gain"/>
 
       <define 
         name="OL_Y_YAW_GAIN" 
-        value="5.8" 
+        value="4.0" 
         description="outer loop y yawVel gain"/>
 
       <define

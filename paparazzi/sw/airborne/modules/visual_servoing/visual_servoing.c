@@ -1842,6 +1842,10 @@ static void visual_servoing_capture_reference(void)
     RadOfDeg(3.0f)
   );
 
+  #ifdef VS_ROLL_TRIM_OVERRIDE_DEG
+    visual_servoing.roll_trim = RadOfDeg(VS_ROLL_TRIM_OVERRIDE_DEG);
+  #endif  
+
   BoundAbs(
     visual_servoing.roll_trim,
     RadOfDeg(VS_ROLL_TRIM_ABS_MAX_DEG)
@@ -3566,7 +3570,7 @@ bool visual_servoing_experiment_done(void)
 {
   const double now=visual_servoing_time_s(get_sys_time_usec());
   if (visual_servoing.have_oscillation_onset) {
-    return now-visual_servoing.oscillation_onset_s>=60.;
+    return now-visual_servoing.oscillation_onset_s>=30.;
   }
   return now-visual_servoing.module_entry_s>=75.;
 }

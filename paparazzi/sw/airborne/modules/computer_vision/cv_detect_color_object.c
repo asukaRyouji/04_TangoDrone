@@ -304,7 +304,9 @@ void color_object_detector_init(void)
  * find_object_centroid
  *
  * Finds the centroid of pixels in an image within filter bounds.
- * Also returns the amount of pixels that satisfy these filter bounds.
+ * Returns count in the original quarter-image sampled-pixel units.
+ * Dense mode uses every matching pixel for the centroid, then rounds N_full/4
+ * for the returned count. The original sparse mode returns its sampled count.
  *
  * @param img - input image to process formatted as YUV422.
  * @param p_xc - x coordinate of the centroid of color object
@@ -316,74 +318,81 @@ void color_object_detector_init(void)
  * @param cr_min - minimum cr value for the filter in YCbCr colorspace
  * @param cr_max - maximum cr value for the filter in YCbCr colorspace
  * @param draw - whether or not to draw on image
- * @return number of pixels of image within the filter bounds.
+ * @return color count in legacy sampled-pixel units (see dense mode below).
  */
+/* 1: every pixel on every row; 0: original even-row/even-column sampling. */
+#ifndef COLOR_OBJECT_DETECTOR_DENSE_SCAN
+#define COLOR_OBJECT_DETECTOR_DENSE_SCAN 1
+#endif
+#if COLOR_OBJECT_DETECTOR_DENSE_SCAN != 0 && COLOR_OBJECT_DETECTOR_DENSE_SCAN != 1
+#error "COLOR_OBJECT_DETECTOR_DENSE_SCAN must be 0 or 1"
+#endif
+
 uint32_t find_object_centroid(struct image_t *img, int32_t* p_xc, int32_t* p_yc, bool draw,
                               uint8_t lum_min, uint8_t lum_max,
                               uint8_t cb_min, uint8_t cb_max,
                               uint8_t cr_min, uint8_t cr_max)
 {
-  uint32_t cnt = 0;
-  uint32_t tot_x = 0;
-  uint32_t tot_y = 0;
+  uint32_t cnt = 0U;
+  uint64_t tot_x = 0U;
+  uint64_t tot_y = 0U;
   uint8_t *buffer = img->buf;
+  const uint32_t row_step = COLOR_OBJECT_DETECTOR_DENSE_SCAN ? 1U : 2U;
+  const uint32_t pixels_per_pair = COLOR_OBJECT_DETECTOR_DENSE_SCAN ? 2U : 1U;
 
-  // undistort image
-  // float K[9] = {COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.focal_x, 0.0f, COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.center_x,
-  //               0.0f, COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.focal_y, COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.center_y,
-  //               0.0f, 0.0f, 1.0f
-  //              };
-  
-  // float k = COLOR_OBJECT_DETECTOR_CAMERA1.camera_intrinsics.Dhane_k;
+  *p_xc = 0;
+  *p_yc = 0;
+  /* Packed UYVY requires a complete two-pixel pair. */
+  if ((img->w & 1U) != 0U || img->w == 0U || img->h == 0U) {
+    return 0U;
+  }
 
-  // Go through all the pixels
-  for (uint16_t y = 0; y < img->h; y += 2) {
-    for (uint16_t x = 0; x < img->w; x += 2) {
-
-      const uint32_t offset = y * 2U * img->w + 2U * x;
-
-      uint8_t *up = &buffer[offset];
-      uint8_t *yp = &buffer[offset + 1U];
-      uint8_t *vp = &buffer[offset + 2U];
-
-      if ((*yp >= lum_min) && (*yp <= lum_max) && (*up >= cb_min)  && (*up <= cb_max) && (*vp >= cr_min)  && (*vp <= cr_max)) 
-      {
-        cnt++;
-        tot_x += x;
-        tot_y += y;
-
-        if (draw) {
-          *yp = 240;
+  for (uint32_t y = 0U; y < img->h; y += row_step) {
+    for (uint32_t x = 0U; x < img->w; x += 2U) {
+      const size_t offset = ((size_t)y * img->w + x) * 2U;
+      /* Bytes: U, Y(x), V, Y(x+1). Both pixels share U and V. */
+      const uint8_t u = buffer[offset];
+      const uint8_t v = buffer[offset + 2U];
+      if (u < cb_min || u > cb_max || v < cr_min || v > cr_max) {
+        continue;
+      }
+      for (uint32_t k = 0U; k < pixels_per_pair; k++) {
+        uint8_t *yp = &buffer[offset + 1U + 2U * k];
+        if (*yp >= lum_min && *yp <= lum_max) {
+          cnt++;
+          tot_x += x + k;
+          tot_y += y;
+          if (draw) {
+            *yp = 240;
+          }
         }
       }
     }
   }
 
-  if (cnt > 0) {
-    uint32_t p_xc_norm = (uint32_t)roundf(tot_x / ((float)cnt));
-
-    uint32_t p_yc_norm = (uint32_t)roundf(tot_y / ((float)cnt));
-
-    if (draw) 
-    {
+  if (cnt > 0U) {
+    const float mean_x = (float)tot_x / (float)cnt;
+    const float mean_y = (float)tot_y / (float)cnt;
+    if (draw) {
       const int size_crosshair = 10;
       uint8_t blue_color[4] = {0, 128, 0, 128};
-
-      struct point_t loc = {.x = p_xc_norm, .y = p_yc_norm};
-
+      struct point_t loc = {
+        .x = (uint32_t)roundf(mean_x),
+        .y = (uint32_t)roundf(mean_y)
+      };
       image_draw_crosshair(img, &loc, blue_color, size_crosshair);
     }
-
-    *p_xc = (int32_t)roundf(tot_x / ((float)cnt) - img->w * 0.5f);
-
-    *p_yc = (int32_t)roundf(img->h * 0.5f - tot_y / ((float)cnt));
-  } else {
-    *p_xc = 0;
-    *p_yc = 0;
+    *p_xc = (int32_t)roundf(mean_x - img->w * 0.5f);
+    *p_yc = (int32_t)roundf(img->h * 0.5f - mean_y);
   }
 
-  return cnt;
+  /* Keep the old sampled-count units for existing thresholds and OE noise.
+   * Centroids above use the full cnt; only the published count is normalized.
+   * Integer ABI count: nearest integer to N_full / 4 (ties upward).
+   */
+  return COLOR_OBJECT_DETECTOR_DENSE_SCAN ? (cnt + 2U) / 4U : cnt;
 }
+
 
 void color_object_detector_periodic(void)
 {
