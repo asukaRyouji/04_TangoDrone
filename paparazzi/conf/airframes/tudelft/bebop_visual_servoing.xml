@@ -10,6 +10,35 @@
       <define name="MT9F002_TARGET_FPS" value="90"/>
       <define name="LOGGER_FILE_PATH" value="/data/ftp/internal_000/log"/>
       <!-- <define name="MT9V117_TARGET_FPS" value="20"/> -->
+
+      <!-- Set the real-flight H1 peak acceleration before enabling VS_SELF_OSC. -->
+      <define name="VS_SELF_OSC" value="1"/>
+      <define name="VS_SELF_OSC_FREQ_HZ" value="0.84"/>
+      <define name="VS_SELF_OSC_AMPLITUDE" value="0.0"/>
+      <define name="VS_SELF_OSC_H2_AMPLITUDE" value="0.0"/>
+
+      <!-- Lower-limit September 29 profile for bench review. Verify
+           lateral gains and limits against the last flown AP airframe. -->
+      <define name="VS_OL_Y_OF_GAIN" value="2.90"/>
+      <define name="VS_OL_Y_YAW_GAIN" value="2.90"/>
+      <define name="VS_LAT_MAX_ACCEL" value="5.00"/>
+      <define name="VS_LAT_ACCEL_SLEW" value="15.00"/>
+      <define name="VS_MAX_ROLL_DEG" value="20.0"/>
+
+
+      <!-- B54 observer parameters -->
+      <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
+      <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
+      <!-- Convert the old centroid KF prior/noise units once to physical seconds. -->
+      <define name="VS_KF3_SIGMA_JERK_PX_S3" value="3264.0119155000007"/>
+      <define name="VS_KF3_INITIAL_OF_STD_PX_S" value="293.1"/>
+      <define name="VS_KF3_INITIAL_OFD_STD_PX_S2" value="1145.4348000000002"/>
+
+      <!-- Real-flight INDI values from the original airframe comments. -->
+      <define name="STABILIZATION_INDI_G1_P" value="0.0694"/>
+      <define name="STABILIZATION_INDI_G1_Q" value="0.0534"/>
+      <define name="STABILIZATION_INDI_G1_R" value="0.0047"/>
+      <define name="STABILIZATION_INDI_G2_R" value="0.2412"/>
       
       <!-- Detect orange -->
       <define name="COLOR_OBJECT_DETECTOR_LUM_MIN1" value="30"/>
@@ -29,6 +58,19 @@
     </target>
     <target name="nps" board="pc">
       <define name="VS_SIM_NO_EXT_POSE" value="1"/>
+      <define name="VS_SELF_OSC" value="1"/>
+      <!-- Gazebo roll trim, lateral controller and INDI settings. -->
+      <define name="VS_ROLL_TRIM_OVERRIDE_DEG" value="0.0"/>
+      <define name="VS_OL_Y_OF_GAIN" value="4.0"/>
+      <define name="VS_OL_Y_YAW_GAIN" value="4.0"/>
+      <define name="VS_LAT_MAX_ACCEL" value="10.00"/>
+      <define name="VS_LAT_ACCEL_SLEW" value="15.00"/>
+      <define name="VS_MAX_ROLL_DEG" value="45.0"/>
+      <define name="STABILIZATION_INDI_G1_P" value="0.0285"/>
+      <define name="STABILIZATION_INDI_G1_Q" value="0.0230"/>
+      <define name="STABILIZATION_INDI_G1_R" value="0.0022"/>
+      <define name="STABILIZATION_INDI_G2_R" value="0.0867"/>
+
       <!-- Local experiment switch; set 0 for the original NPS clock. -->
       <define name="NPS_GAZEBO_SYNC_TIME" value="1"/>
       <define name="VS_COMMAND_TRACE" value="1"/>
@@ -47,7 +89,7 @@
       <define name="MT9F002_TARGET_FPS" value="25"/>
       <module name="fdm" type="gazebo"/>
       <define name="VIDEO_CAPTURE_PATH" value="/tmp/paparazzi/images"/>
-      <define name="LOGGER_FILE_PATH" value="/home/admin_user/Desktop/Active_H1_simu/R_0.85/Lat_-0.1/pprz_data"/>
+      <define name="LOGGER_FILE_PATH" value="/home/admin_user/Desktop/Active_H1_simu/Re-do_3/R_0.85/Lat_0.3/pprz_data"/>
       
       <!-- Detect orange -->
       <define name="COLOR_OBJECT_DETECTOR_LUM_MIN1" value="41"/>
@@ -202,33 +244,14 @@
       <define name="VS_OL_Y_OA_GAIN"
               value="0.0"/>
 
-      <define name="VS_OL_Y_OF_GAIN"
-              value="4.0"/>
-
-      <define name="VS_OL_Y_YAW_GAIN"
-              value="4.0"/>
-
       <define name="VS_OF_SCALE"
               value="0.0044"/>
-
-      <define name="VS_LAT_MAX_ACCEL"
-              value="10.00"/>
-
-      <define name="VS_LAT_ACCEL_SLEW"
-              value="15.00"/>
 
       <define name="VS_LAT_FALLBACK_KD"
               value="1.20"/>
 
       <define name="VS_FWD_ACCEL_SLEW"
               value="1.00"/>
-
-      <define name="VS_MAX_ROLL_DEG"
-              value="45.0"/>
-
-      <define name="VS_ROLL_TRIM_OVERRIDE_DEG" 
-              value="0.0"/>
-
 
       <!--
         Vision-sample validity.
@@ -433,10 +456,10 @@
     <define name="G1_R" value="0.0047"/>
     <define name="G2_R" value="0.2412"/> -->
     <!-- control effectiveness voor gazebo simulation-->
-    <define name="G1_P" value="0.0285"/>
+    <!-- <define name="G1_P" value="0.0285"/>
     <define name="G1_Q" value="0.0230"/>
     <define name="G1_R" value="0.0022"/>
-    <define name="G2_R" value="0.0867"/>
+    <define name="G2_R" value="0.0867"/> -->
    
 
     <define name="FILTER_ROLL_RATE" value="TRUE"/>

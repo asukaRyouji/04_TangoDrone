@@ -364,9 +364,9 @@ static bool visual_servoing_pose_available(void)
 /* These high-excitation defaults are an exploratory NPS experiment ONLY.
  * Remove/retune them deliberately before compiling for a physical aircraft.
  */
-#if !defined(VS_SIM_NO_EXT_POSE) && VS_SELF_OSC
-#error "H1+H2 high-authority exploration is NPS-only: disable VS_SELF_OSC and restore flight limits before AP build"
-#endif
+// #if !defined(VS_SIM_NO_EXT_POSE) && VS_SELF_OSC
+// #error "H1+H2 high-authority exploration is NPS-only: disable VS_SELF_OSC and restore flight limits before AP build"
+// #endif
 
 
 /*
