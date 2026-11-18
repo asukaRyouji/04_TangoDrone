@@ -32,6 +32,7 @@
 #include "modules/core/abi.h"
 #include "std.h"
 #include "mcu_periph/sys_time.h"
+#include "generated/airframe.h"
 
 #include <sys/time.h>
 #include <time.h>
@@ -227,7 +228,12 @@ struct image_t *object_detector1(struct image_t *img, uint8_t camera_id __attrib
         return img;
     }
 
+#if defined(COLOR_OBJECT_DETECTOR_USE_PPRZ_TIMESTAMP) && COLOR_OBJECT_DETECTOR_USE_PPRZ_TIMESTAMP
+    /* Bebop stamps the ready frame in the same clock used by the observer. */
+    return object_detector(img, 1, img->pprz_ts);
+#else
     return object_detector(img, 1, img_ts_us);
+#endif
 }
 
 // struct image_t *object_detector2(struct image_t *img, uint8_t camera_id);

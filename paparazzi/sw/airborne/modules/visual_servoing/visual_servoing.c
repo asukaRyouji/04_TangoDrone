@@ -339,7 +339,7 @@ static bool visual_servoing_pose_available(void)
 /* ONE compile-time oscillator switch: H1+H2 ON/OFF together.
  * Keep exploratory settings OFF the real aircraft. */
 #ifndef VS_SELF_OSC
-#define VS_SELF_OSC TRUE
+#define VS_SELF_OSC FALSE
 #endif
 
 #ifndef VS_SELF_OSC_FREQ_HZ
@@ -361,12 +361,6 @@ static bool visual_servoing_pose_available(void)
 #define VS_SELF_OSC_H2_PHASE_RAD 0.0f
 #endif
 
-/* These high-excitation defaults are an exploratory NPS experiment ONLY.
- * Remove/retune them deliberately before compiling for a physical aircraft.
- */
-// #if !defined(VS_SIM_NO_EXT_POSE) && VS_SELF_OSC
-// #error "H1+H2 high-authority exploration is NPS-only: disable VS_SELF_OSC and restore flight limits before AP build"
-// #endif
 
 
 /*
@@ -683,7 +677,7 @@ static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32
 #ifdef VS_SIM_NO_EXT_POSE
   visual_servoing.vision_stamp_us=sim_clock_capture_to_sys_us(stamp);
 #else
-  /* Hardware image timestamps must already share the autopilot epoch. */
+  /* The AP detector publishes the Bebop frame-ready stamp in AP system time. */
   visual_servoing.vision_stamp_us=stamp;
 #endif
   visual_servoing.vision_receive_us=get_sys_time_usec();

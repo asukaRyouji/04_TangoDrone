@@ -6,39 +6,58 @@
 
   <firmware name="rotorcraft">
     <target name="ap" board="bebop">
-      <define name="VIDEO_CAPTURE_PATH" value="/data/ftp/internal_000/images"/>
-      <define name="MT9F002_TARGET_FPS" value="90"/>
-      <define name="LOGGER_FILE_PATH" value="/data/ftp/internal_000/log"/>
-      <!-- <define name="MT9V117_TARGET_FPS" value="20"/> -->
-
       <!-- Set the real-flight H1 peak acceleration before enabling VS_SELF_OSC. -->
-      <define name="VS_SELF_OSC" value="1"/>
+      <define name="VS_SELF_OSC" value="0"/>
       <define name="VS_SELF_OSC_FREQ_HZ" value="0.84"/>
       <define name="VS_SELF_OSC_AMPLITUDE" value="0.0"/>
       <define name="VS_SELF_OSC_H2_AMPLITUDE" value="0.0"/>
+
+      <!-- Real-flight centroid KF3 and NAV pre-roll. -->
+      <define name="COLOR_OBJECT_DETECTOR_USE_PPRZ_TIMESTAMP" value="1"/>
+      <define name="COLOR_OBJECT_DETECTOR_DENSE_SCAN" value="0"/>
+      <define name="VS_KF3_SIGMA_C_PX" value="2.0f"/>
+      <define name="VS_KF3_SIGMA_JERK_PX_S3" value="3500.0f"/>
+      <define name="VS_KF3_INITIAL_OF_STD_PX_S" value="300.0f"/>
+      <define name="VS_KF3_INITIAL_OFD_STD_PX_S2" value="1200.0f"/>
+      <define name="VS_KF3_WARMUP_TIME" value="2.0f"/>
+      <define name="VS_KF3_WARMUP_MIN_FRAMES" value="40U"/>
+
+      <!-- Normal B54 from the November 0.85 m P2 simulation study. -->
+      <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
+      <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
+      <define name="VS_OBS_L" value="50.15151415854669"/>
+      <define name="VS_OBS_GAMMA" value="209319.19974781992"/>
+      <define name="VS_OBS_C_REL" value="0.7802627029354566"/>
+      <define name="VS_OBS_ETA" value="1.9998815558594214"/>
+      <define name="VS_OBS_AO" value="150.09048278072538"/>
+      <define name="VS_OBS_AA" value="1.0000008592583425e-6"/>
+
+      <!-- Gazebo reference fit for the first AP command trace. -->
+      <define name="VS_MODEL_GAIN" value="1.0091425226221304"/>
+      <define name="VS_MODEL_DELAY_S" value="0.042784922897280586"/>
+      <define name="VS_MODEL_T_S" value="0.05643605760359116"/>
+      <define name="VS_MODEL_SLEW" value="14.39660089411945"/>
+      <define name="VS_MODEL_DRAG" value="0.985664360409502"/>
+      <define name="VS_COMMAND_TRACE" value="1"/>
 
       <!-- Lower-limit September 29 profile for bench review. Verify
            lateral gains and limits against the last flown AP airframe. -->
       <define name="VS_OL_Y_OF_GAIN" value="2.90"/>
       <define name="VS_OL_Y_YAW_GAIN" value="2.90"/>
-      <define name="VS_LAT_MAX_ACCEL" value="5.00"/>
+      <define name="VS_LAT_MAX_ACCEL" value="3.00"/>
       <define name="VS_LAT_ACCEL_SLEW" value="15.00"/>
-      <define name="VS_MAX_ROLL_DEG" value="20.0"/>
-
-
-      <!-- B54 observer parameters -->
-      <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
-      <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
-      <!-- Convert the old centroid KF prior/noise units once to physical seconds. -->
-      <define name="VS_KF3_SIGMA_JERK_PX_S3" value="3264.0119155000007"/>
-      <define name="VS_KF3_INITIAL_OF_STD_PX_S" value="293.1"/>
-      <define name="VS_KF3_INITIAL_OFD_STD_PX_S2" value="1145.4348000000002"/>
+      <define name="VS_MAX_ROLL_DEG" value="8.0"/>
 
       <!-- Real-flight INDI values from the original airframe comments. -->
       <define name="STABILIZATION_INDI_G1_P" value="0.0694"/>
       <define name="STABILIZATION_INDI_G1_Q" value="0.0534"/>
       <define name="STABILIZATION_INDI_G1_R" value="0.0047"/>
       <define name="STABILIZATION_INDI_G2_R" value="0.2412"/>
+
+      <define name="VIDEO_CAPTURE_PATH" value="/data/ftp/internal_000/images"/>
+      <define name="MT9F002_TARGET_FPS" value="90"/>
+      <define name="LOGGER_FILE_PATH" value="/data/ftp/internal_000/log"/>
+      <!-- <define name="MT9V117_TARGET_FPS" value="20"/> -->
       
       <!-- Detect orange -->
       <define name="COLOR_OBJECT_DETECTOR_LUM_MIN1" value="30"/>
@@ -80,12 +99,32 @@
       <define name="VS_SELF_OSC_AMPLITUDE" value="1.98"/>
       <define name="VS_SELF_OSC_H2_AMPLITUDE" value="0.0"/>
       <define name="VS_SELF_OSC_H2_PHASE_RAD" value="0.0"/>
-      <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
-      <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
-      <!-- Convert the old centroid KF prior/noise units once to physical seconds. -->
+
+      <!-- Gazebo centroid KF3 and NAV pre-roll. -->
+      <define name="VS_KF3_SIGMA_C_PX" value="2.0f"/>
       <define name="VS_KF3_SIGMA_JERK_PX_S3" value="3264.0119155000007"/>
       <define name="VS_KF3_INITIAL_OF_STD_PX_S" value="293.1"/>
       <define name="VS_KF3_INITIAL_OFD_STD_PX_S2" value="1145.4348000000002"/>
+      <define name="VS_KF3_WARMUP_TIME" value="2.0f"/>
+      <define name="VS_KF3_WARMUP_MIN_FRAMES" value="40U"/>
+
+      <!-- Normal B54 simulation baseline. -->
+      <define name="VS_OBS_INITIAL_R_M" value="1.0"/>
+      <define name="VS_OBS_MAX_STEP_S" value="0.000078125"/>
+      <define name="VS_OBS_L" value="188.1389907523311"/>
+      <define name="VS_OBS_GAMMA" value="55838.624059640948"/>
+      <define name="VS_OBS_C_REL" value="30.0"/>
+      <define name="VS_OBS_ETA" value="1.9998815558594214"/>
+      <define name="VS_OBS_AO" value="46.685563409310859"/>
+      <define name="VS_OBS_AA" value="1.0000008592583425e-6"/>
+
+      <!-- Gazebo command-to-acceleration model. -->
+      <define name="VS_MODEL_GAIN" value="1.0091425226221304"/>
+      <define name="VS_MODEL_DELAY_S" value="0.042784922897280586"/>
+      <define name="VS_MODEL_T_S" value="0.05643605760359116"/>
+      <define name="VS_MODEL_SLEW" value="14.39660089411945"/>
+      <define name="VS_MODEL_DRAG" value="0.985664360409502"/>
+
       <define name="MT9F002_TARGET_FPS" value="25"/>
       <module name="fdm" type="gazebo"/>
       <define name="VIDEO_CAPTURE_PATH" value="/tmp/paparazzi/images"/>
@@ -252,6 +291,7 @@
 
       <define name="VS_FWD_ACCEL_SLEW"
               value="1.00"/>
+
 
       <!--
         Vision-sample validity.
@@ -450,16 +490,7 @@
     <define name="G1_R" value="0.0037"/>
     <define name="G2_R" value="0.2062"/> -->
 
-    <!-- control effectiveness voor real flight-->
-    <!-- <define name="G1_P" value="0.0694"/>
-    <define name="G1_Q" value="0.0534"/>
-    <define name="G1_R" value="0.0047"/>
-    <define name="G2_R" value="0.2412"/> -->
-    <!-- control effectiveness voor gazebo simulation-->
-    <!-- <define name="G1_P" value="0.0285"/>
-    <define name="G1_Q" value="0.0230"/>
-    <define name="G1_R" value="0.0022"/>
-    <define name="G2_R" value="0.0867"/> -->
+    <!-- G1/G2 control effectiveness is configured per firmware target. -->
    
 
     <define name="FILTER_ROLL_RATE" value="TRUE"/>

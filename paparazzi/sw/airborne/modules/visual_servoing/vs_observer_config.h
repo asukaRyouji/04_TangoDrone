@@ -2,7 +2,11 @@
 #define VS_OBSERVER_CONFIG_H
 /* SI seconds. Fixed shared phase profile and six-condition correction fit.
  * See Frozen_Profile_Aligned.json for the split and validation limits. */
+#ifdef VS_OBS_L
+#define VS_OBSERVER_PROFILE "B54_KF50_OF_UNITY_ALIGNED_AIRFRAME_GAINS"
+#else
 #define VS_OBSERVER_PROFILE "B54_KF50_OF_UNITY_ALIGNED_RETUNED_20261029"
+#endif
 #ifndef VS_OBS_ACCEL_ALIGNMENT_S
 #define VS_OBS_ACCEL_ALIGNMENT_S 0.022112122381593415
 #endif
@@ -15,22 +19,46 @@
 #ifndef VS_OBS_TIMEOUT_S
 #define VS_OBS_TIMEOUT_S 0.15
 #endif
+/* Preserve the frozen defaults and allow airframe-specific correction gains. */
+#ifndef VS_OBS_L
 #define VS_OBS_L 188.1389907523311
+#endif
+#ifndef VS_OBS_GAMMA
 #define VS_OBS_GAMMA 55838.624059640948
+#endif
+#ifndef VS_OBS_C_REL
 #define VS_OBS_C_REL 30.0
+#endif
+#ifndef VS_OBS_ETA
 #define VS_OBS_ETA (621.0178545002864 / 310.5273173207563)
+#endif
+#ifndef VS_OBS_AO
 #define VS_OBS_AO 46.685563409310859
+#endif
+#ifndef VS_OBS_AA
 #define VS_OBS_AA 1.0000008592583425e-06
+#endif
 #define VS_OBS_OF_GAIN 1.0
 #define VS_OBS_OF_BUFFER_S 0.016536834788524343
 #define VS_OBS_OE_BUFFER_S 0
 #define VS_OE_Q 6.715867380013829
 #define VS_OE_GAIN 0.28235979283956864
+/* Command-to-acceleration fit for the bounded lateral command input. */
+#ifndef VS_MODEL_GAIN
 #define VS_MODEL_GAIN 1.0091425226221304
+#endif
+#ifndef VS_MODEL_DELAY_S
 #define VS_MODEL_DELAY_S 0.042784922897280586
+#endif
+#ifndef VS_MODEL_T_S
 #define VS_MODEL_T_S 0.05643605760359116
+#endif
+#ifndef VS_MODEL_SLEW
 #define VS_MODEL_SLEW 14.39660089411945
+#endif
+#ifndef VS_MODEL_DRAG
 #define VS_MODEL_DRAG 0.985664360409502
+#endif
 #define VS_MODEL_QUIET_WARMUP_S 2.0
 #define VS_MODEL_COMMAND_MAX_GAP_S 0.05
 #define VS_OBS_H0_WINDOW_S 0.045

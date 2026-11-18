@@ -504,10 +504,19 @@ static void logger_metadata(FILE *f)
   fprintf(f,"OF_control_gain,%.12g\nyaw_control_gain,%.12g\nOF_pixel_scale,%.12g\nlat_accel_max,%.12g\nlat_accel_slew,%.12g\nroll_max_deg,%.12g\n",
     (double)visual_servoing.ol_y_OF_gain,(double)visual_servoing.ol_y_YAW_gain,(double)visual_servoing.of_scale,
     (double)visual_servoing.lat_max_accel,(double)visual_servoing.lat_accel_slew,(double)visual_servoing.max_roll_deg);
-  fputs("build_profile," VS_OBSERVER_PROFILE "\nestimator_time_base,physical_seconds_in_NPS\n",f);
+  fputs("build_profile," VS_OBSERVER_PROFILE "\n",f);
+#ifdef VS_SIM_NO_EXT_POSE
+  fputs("estimator_time_base,physical_seconds_in_NPS\n",f);
+#else
+  fputs("estimator_time_base,autopilot_system_seconds\n",f);
+#endif
   fprintf(f,"OF_buffer_s,%.17g\nOE_buffer_s,%.17g\n",
     (double)VS_OBS_OF_BUFFER_S,(double)VS_OBS_OE_BUFFER_S);
-  fputs("OE_initial_sd,0.5\nOE_derivative_initial_sd,2\ncount_absolute_sd,1\ncount_relative_sd,0.015\ncamera_configured_hz,25\nscan_stride_x,2\nscan_stride_y,2\nstate_epoch_assumption,availability_minus_configured_visual_delay_phase_approximation\n",f);
+  fputs("OE_initial_sd,0.5\nOE_derivative_initial_sd,2\ncount_absolute_sd,1\ncount_relative_sd,0.015\n",f);
+#ifdef MT9F002_TARGET_FPS
+  fprintf(f,"camera_configured_hz,%g\n",(double)MT9F002_TARGET_FPS);
+#endif
+  fputs("scan_stride_x,2\nscan_stride_y,2\nstate_epoch_assumption,availability_minus_configured_visual_delay_phase_approximation\n",f);
 #ifdef SYS_TIME_FREQUENCY
   fprintf(f,"sys_time_frequency,%u\n",(unsigned)SYS_TIME_FREQUENCY);
 #endif
