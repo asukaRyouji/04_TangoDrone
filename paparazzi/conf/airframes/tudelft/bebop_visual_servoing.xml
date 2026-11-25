@@ -43,6 +43,9 @@
       <!-- Lower-limit September 29 profile for bench review. Verify
            lateral gains and limits against the last flown AP airframe. -->
       <!-- define name="VS_ROLL_TRIM_OVERRIDE_DEG" value="-1.85"/ -->
+      <define name="VS_PITCH_TRIM_FROM_NAV" value="1"/>
+      <!-- Pitch fallback for direct MODULE entry without a settled NAV estimate. -->
+      <define name="VS_PITCH_TRIM_FALLBACK_DEG" value="-1.15"/>
       <define name="VS_OL_Y_OF_GAIN" value="1.80"/>
       <define name="VS_OL_Y_YAW_GAIN" value="1.80"/>
       <define name="VS_LAT_MAX_ACCEL" value="4.00"/>
@@ -266,8 +269,7 @@
       <define name="VS_FWD_KI"
               value="0.03"/>
 
-      <define name="VS_FIXED_PITCH_TRIM_DEG"
-              value="-1.15"/>
+      <!-- <define name="VS_FIXED_PITCH_TRIM_DEG" value="-1.15"/> -->
 
       <define name="VS_FWD_I_MAX_ACCEL"
               value="0.08"/>

@@ -164,17 +164,22 @@ static bool visual_servoing_pose_available(void)
  *
  * Position is in metres, velocity in m/s and output in m/s^2.
  */
-/*
- * Fixed, aircraft-specific forward pitch feedforward.
- *
- * The airframe normally overrides this using:
- *
- *   VS_FIXED_PITCH_TRIM_DEG
- */
-
 #ifndef VS_FIXED_PITCH_TRIM_DEG
 #define VS_FIXED_PITCH_TRIM_DEG (-1.95f)
 #endif
+
+#ifndef VS_PITCH_TRIM_FROM_NAV
+#define VS_PITCH_TRIM_FROM_NAV 0
+#endif
+
+/* Fallback for direct MODULE entry without a settled NAV estimate. */
+#ifndef VS_PITCH_TRIM_FALLBACK_DEG
+#define VS_PITCH_TRIM_FALLBACK_DEG VS_FIXED_PITCH_TRIM_DEG
+#endif
+
+#define VS_PITCH_TRIM_AVG_TIME_US 300000U
+#define VS_PITCH_TRIM_MIN_SAMPLES 20U
+#define VS_PITCH_TRIM_ABS_MAX_DEG 3.0f
 
 /*
  * ==============================================================
@@ -749,6 +754,42 @@ static void visual_servoing_reset_roll_trim_average(void);
  */
 static void visual_servoing_update_roll_trim_average(uint32_t now_us);
 
+static struct {
+  uint32_t start_us;
+  uint32_t sample_count;
+  float sum;
+  bool valid;
+} nav_pitch_trim;
+
+static void visual_servoing_reset_pitch_trim_average(void)
+{
+  nav_pitch_trim.sample_count = 0U;
+  nav_pitch_trim.valid = false;
+}
+
+static void visual_servoing_update_pitch_trim_average(uint32_t now_us, float cos_psi, float sin_psi)
+{
+  const float trim_i_n = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.x);
+  const float trim_i_e = ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.y);
+  /* Match NAV's sign convention: negative pitch commands forward acceleration. */
+  float sample = -(cos_psi * trim_i_n + sin_psi * trim_i_e);
+  if (!isfinite(sample)) {
+    visual_servoing_reset_pitch_trim_average();
+    return;
+  }
+
+  BoundAbs(sample, RadOfDeg(VS_PITCH_TRIM_ABS_MAX_DEG));
+  if (nav_pitch_trim.sample_count == 0U) {
+    nav_pitch_trim.start_us = now_us;
+    nav_pitch_trim.sum = 0.0f;
+  }
+
+  nav_pitch_trim.sum += sample;
+  nav_pitch_trim.sample_count++;
+  nav_pitch_trim.valid = nav_pitch_trim.sample_count >= VS_PITCH_TRIM_MIN_SAMPLES &&
+    (now_us - nav_pitch_trim.start_us) >= VS_PITCH_TRIM_AVG_TIME_US;
+}
+
 /*
  * Capture forward-position, heading and hover-trim references
  * when visual-servoing mode is entered.
@@ -1005,6 +1046,7 @@ void visual_servoing_module_init(void)
    * initialization.
    */
   visual_servoing_reset_roll_trim_average();
+  visual_servoing_reset_pitch_trim_average();
 
   /*
    * Position-gate state.
@@ -1216,6 +1258,7 @@ void visual_servoing_request_start(void)
    * above and therefore do NOT destroy the current average.
    */
   visual_servoing_reset_roll_trim_average();
+  visual_servoing_reset_pitch_trim_average();
 
   /*
    * ============================================================
@@ -1325,6 +1368,7 @@ void visual_servoing_request_start(void)
 
 void visual_servoing_cancel_request(void)
 {
+  visual_servoing_reset_pitch_trim_average();
   visual_servoing.mu_y_control=0;
   visual_servoing.applied_command_valid=false;
   visual_servoing.have_oscillation_onset=false;
@@ -1817,12 +1861,13 @@ static void visual_servoing_capture_reference(void)
   }
 
 
-  /*
-   * Forward pitch bias remains fixed at the already identified
-   * aircraft-specific value.
-   */
+  /* Freeze the pitch feedforward at MODULE entry. */
   #ifdef VS_SIM_NO_EXT_POSE
     visual_servoing.pitch_trim = 0.0f;
+  #elif VS_PITCH_TRIM_FROM_NAV
+    visual_servoing.pitch_trim = nav_pitch_trim.valid
+      ? nav_pitch_trim.sum / (float)nav_pitch_trim.sample_count
+      : RadOfDeg(VS_PITCH_TRIM_FALLBACK_DEG);
   #else
     visual_servoing.pitch_trim = RadOfDeg(VS_FIXED_PITCH_TRIM_DEG);
   #endif
@@ -1833,7 +1878,7 @@ static void visual_servoing_capture_reference(void)
    */
   BoundAbs(
     visual_servoing.pitch_trim,
-    RadOfDeg(3.0f)
+    RadOfDeg(VS_PITCH_TRIM_ABS_MAX_DEG)
   );
 
   #ifdef VS_ROLL_TRIM_OVERRIDE_DEG
@@ -2219,6 +2264,7 @@ static void visual_servoing_update_activation(uint32_t now_us)
 
 
     visual_servoing_reset_roll_trim_average();
+    visual_servoing_reset_pitch_trim_average();
 
     return;
   }
@@ -2396,6 +2442,15 @@ static void visual_servoing_update_activation(uint32_t now_us)
       visual_servoing_reset_roll_trim_average();
   }
 
+  if (VS_PITCH_TRIM_FROM_NAV) {
+    const float forward_position_error = cos_psi * position_error_n + sin_psi * position_error_e;
+    if (forward_ok && fabsf(forward_position_error) <= visual_servoing.settle_horizontal_pos_max) {
+      visual_servoing_update_pitch_trim_average(now_us, cos_psi, sin_psi);
+    } else {
+      visual_servoing_reset_pitch_trim_average();
+    }
+  }
+
   /* Full activation gate remains three-axis. */
   if (!visual_servoing.settle_condition) 
   {
@@ -2405,7 +2460,7 @@ static void visual_servoing_update_activation(uint32_t now_us)
       return;
   }
 
-  /* Full gate only needs its ordinary 0.30 s dwell. */
+  /* Track the full settle dwell independently of the trim windows. */
   if (visual_servoing.settle_condition_start_us == 0U) 
   {
       visual_servoing.settle_condition_start_us = now_us;
@@ -2425,11 +2480,12 @@ static void visual_servoing_update_activation(uint32_t now_us)
    * All independent entry requirements must now be ready:
    *
    *   1. mechanical settle dwell complete;
-   *   2. NAV-derived roll-trim average valid;
+   *   2. NAV-derived roll trim and, when enabled, pitch trim valid;
    *   3. KF3 has accumulated a continuous two-second visual pre-roll;
    *   4. the B54 acceleration model is ready when self-oscillation is enabled.
    */
   if (!visual_servoing.roll_trim_average_valid ||
+      (VS_PITCH_TRIM_FROM_NAV && !nav_pitch_trim.valid) ||
       !visual_servoing.kf_warmup_ready ||
       !visual_servoing.of_ready ||
       !visual_servoing.vision_valid ||
