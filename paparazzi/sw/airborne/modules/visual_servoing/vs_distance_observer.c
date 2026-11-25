@@ -52,36 +52,59 @@ static void model_advance(struct VsDynamics *m,double old_u,double dt,double u)
   }
 }
 
-void vs_model_command(struct VsModel *m, double t, double u, bool valid, bool quiet)
+static void model_reset(struct VsModel *m)
 {
-  if (!valid || !isfinite(t) || !isfinite(u)) {
-    if (m->seeded) { m->resets++; }
-    m->seeded=m->ready=false; m->count=m->head=0; m->warm_elapsed_s=0;
+  if (m->seeded) { m->resets++; }
+  m->seeded = m->ready = false;
+  m->count = m->head = 0;
+  m->warm_elapsed_s = 0;
+}
+
+static void model_command(struct VsModel *m, double t, double u, bool valid_input,
+                          bool warmup, double initial_velocity)
+{
+  if (!valid_input || !isfinite(t) || !isfinite(u)) {
+    model_reset(m);
     return;
   }
   if (!m->seeded) {
-    /* A genuinely quiet start is required for the unmeasured v_m(0)=0 prior. */
-    if (!quiet) { return; }
-    m->t=m->warm_start_s=t; m->z=m->y=m->u=u; m->v=0;
+    if (!warmup) { return; }
+    m->t = m->warm_start_s = t;
+    m->z = m->y = m->u = u;
+    m->v = initial_velocity;
     m->seeded=true;
   } else {
     const double dt=t-m->t;
     if (dt<0 || dt>VS_MODEL_COMMAND_MAX_GAP_S) {
-      m->seeded=m->ready=false; m->count=m->head=0; m->resets++; return;
+      model_reset(m);
+      return;
     }
     struct VsDynamics dynamics={m->z,m->y,m->v};
     model_advance(&dynamics,m->u,dt,u);
     m->z=dynamics.z; m->y=dynamics.y; m->v=dynamics.v;
     m->t=t; m->u=u;
   }
-  if (quiet) {
+  if (warmup) {
     m->warm_elapsed_s=t-m->warm_start_s;
+    /* Use the same configured interval for both initialization paths. */
     if (m->warm_elapsed_s>=VS_MODEL_QUIET_WARMUP_S) { m->ready=true; }
   }
   m->ring[m->head]=(struct VsModelPoint){t,m->z,m->y,m->v,m->u};
   m->head=(m->head+1)%VS_MODEL_RING_SIZE;
   if (m->count<VS_MODEL_RING_SIZE) { m->count++; }
   m->sequence++;
+}
+
+void vs_model_command(struct VsModel *m, double t, double u, bool valid_input, bool warmup)
+{
+  model_command(m, t, u, valid_input, warmup, 0.0);
+}
+
+void vs_model_command_with_velocity(struct VsModel *m, double t, double u,
+                                    double initial_velocity, bool valid_input)
+{
+  model_command(m, t, u, valid_input && isfinite(initial_velocity),
+                !m->ready, initial_velocity);
 }
 
 bool vs_model_acceleration(const struct VsModel *m, double query_s, double *value)

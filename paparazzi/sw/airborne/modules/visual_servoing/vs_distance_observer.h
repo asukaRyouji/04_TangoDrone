@@ -38,9 +38,11 @@ struct VsDistanceObserver {
 extern struct VsDistanceObserver vs_distance_observer;
 void vs_dobs_init(struct VsDistanceObserver *s);
 void vs_dobs_reset_range(struct VsDistanceObserver *s, enum VsObserverReason why);
-/* During quiet NAV warmup use u=0 and quiet=true. In MODULE use actual bounded
- * pre-slew command and quiet=false. Invalid/non-VS mode must invalidate history. */
-void vs_model_command(struct VsModel *m, double t, double u, bool valid, bool quiet);
+/* Seed at zero velocity and accrue warm-up time when warmup is true. */
+void vs_model_command(struct VsModel *m, double t, double u, bool valid_input, bool warmup);
+/* Seed from INS once per continuous input history, then predict velocity from commands. */
+void vs_model_command_with_velocity(struct VsModel *m, double t, double u,
+                                    double initial_velocity, bool valid_input);
 bool vs_model_acceleration(const struct VsModel *m, double query_s, double *value);
 void vs_dobs_arm(struct VsDistanceObserver *s, double onset_s);
 /* Once per accepted visual sample; source epoch and availability are distinct. */

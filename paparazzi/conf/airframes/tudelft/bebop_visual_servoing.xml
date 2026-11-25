@@ -7,9 +7,9 @@
   <firmware name="rotorcraft">
     <target name="ap" board="bebop">
       <!-- Set the real-flight H1 peak acceleration before enabling VS_SELF_OSC. -->
-      <define name="VS_SELF_OSC" value="0"/>
-      <define name="VS_SELF_OSC_FREQ_HZ" value="0.84"/>
-      <define name="VS_SELF_OSC_AMPLITUDE" value="0.0"/>
+      <define name="VS_SELF_OSC" value="1"/>
+      <define name="VS_SELF_OSC_FREQ_HZ" value="0.63"/>
+      <define name="VS_SELF_OSC_AMPLITUDE" value="1.48"/>
       <define name="VS_SELF_OSC_H2_AMPLITUDE" value="0.0"/>
 
       <!-- Real-flight centroid KF3 and NAV pre-roll. -->
@@ -42,17 +42,18 @@
 
       <!-- Lower-limit September 29 profile for bench review. Verify
            lateral gains and limits against the last flown AP airframe. -->
-      <define name="VS_OL_Y_OF_GAIN" value="2.90"/>
-      <define name="VS_OL_Y_YAW_GAIN" value="2.90"/>
-      <define name="VS_LAT_MAX_ACCEL" value="3.00"/>
+      <define name="VS_ROLL_TRIM_OVERRIDE_DEG" value="-1.85"/>
+      <define name="VS_OL_Y_OF_GAIN" value="1.80"/>
+      <define name="VS_OL_Y_YAW_GAIN" value="1.80"/>
+      <define name="VS_LAT_MAX_ACCEL" value="4.00"/>
       <define name="VS_LAT_ACCEL_SLEW" value="15.00"/>
-      <define name="VS_MAX_ROLL_DEG" value="8.0"/>
+      <define name="VS_MAX_ROLL_DEG" value="15.0"/>
 
       <!-- Real-flight INDI values from the original airframe comments. -->
-      <define name="STABILIZATION_INDI_G1_P" value="0.0694"/>
-      <define name="STABILIZATION_INDI_G1_Q" value="0.0534"/>
-      <define name="STABILIZATION_INDI_G1_R" value="0.0047"/>
-      <define name="STABILIZATION_INDI_G2_R" value="0.2412"/>
+      <define name="STABILIZATION_INDI_G1_P" value="0.0370"/>
+      <define name="STABILIZATION_INDI_G1_Q" value="0.0284"/>
+      <define name="STABILIZATION_INDI_G1_R" value="0.0021"/>
+      <define name="STABILIZATION_INDI_G2_R" value="0.1336"/>
 
       <define name="VIDEO_CAPTURE_PATH" value="/data/ftp/internal_000/images"/>
       <define name="MT9F002_TARGET_FPS" value="90"/>
@@ -239,7 +240,7 @@
 
       <define
         name="VS_SETTLE_DWELL_TIME"
-        value="0.3"/>
+        value="0.2"/>
 
       <define
         name="VS_SETTLE_HORIZONTAL_POS_MAX"
@@ -266,7 +267,7 @@
               value="0.03"/>
 
       <define name="VS_FIXED_PITCH_TRIM_DEG"
-              value="-1.95"/>
+              value="-1.15"/>
 
       <define name="VS_FWD_I_MAX_ACCEL"
               value="0.08"/>
@@ -522,10 +523,10 @@
   </section>
 
   <section name="GUIDANCE_V" prefix="GUIDANCE_V_">
-    <define name="HOVER_KP" value="360"/>
+    <define name="HOVER_KP" value="283"/>
     <define name="HOVER_KD" value="82"/>
     <define name="HOVER_KI" value="20"/>
-    <define name="NOMINAL_HOVER_THROTTLE" value="0.666"/>
+    <define name="NOMINAL_HOVER_THROTTLE" value="0.708"/>
     <define name="ADAPT_THROTTLE_ENABLED" value="FALSE"/>
 
     <define name="ADAPT_INITIAL_HOVER_THROTTLE" value="0.68" />
@@ -541,8 +542,8 @@
     <!-- Bad weather -->
     <!-- define name="MAX_BANK" value="32" unit="deg"/ -->
     <define name="PGAIN" value="120"/>
-    <define name="DGAIN" value="230"/>
-    <define name="IGAIN" value="40"/>
+    <define name="DGAIN" value="100"/>
+    <define name="IGAIN" value="30"/>
   </section>
 
   <section name="NAVIGATION" prefix="NAV_">

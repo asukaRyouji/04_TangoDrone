@@ -1,0 +1,139 @@
+<!DOCTYPE flight_plan SYSTEM "../flight_plan.dtd">
+
+<flight_plan name="TangoDrone INDI identification" alt="0.75" ground_alt="0"
+             lat0="51.990634" lon0="4.376789" security_height="0.4"
+             max_dist_from_home="60">
+  <header>
+    #include "navigation.h"
+    #include "modules/loggers/logger_file.h"
+    #define NPS_GAZEBO_WORLD "cyberzoo2019_moving_flower.world"
+
+    static inline void indi_capture_yaw_hold(uint8_t wp)
+    {
+      waypoint_set_here_2d(wp);
+      waypoint_set_alt_i(wp, nav_flight_altitude);
+    }
+  </header>
+
+  <waypoints>
+    <waypoint name="HOME" lat="51.990634" lon="4.376789"/>
+    <waypoint name="CLIMB" x="-0.300" y="0.000"/>
+    <waypoint name="STDBY" x="-0.300" y="0.000" height="1.00"/>
+    <waypoint name="TD" x="0.800" y="-1.700"/>
+
+    <!-- CyberZoo test directions: +y forward, +x right. -->
+    <waypoint name="ID_CENTER" x="0.000" y="0.000" height="1.00"/>
+    <waypoint name="ID_FORWARD" x="0.000" y="1.000" height="1.00"/>
+    <waypoint name="ID_BACKWARD" x="0.000" y="-1.0" height="1.00"/>
+    <waypoint name="ID_LEFT" x="-1.000" y="0.000" height="1.00"/>
+    <waypoint name="ID_RIGHT" x="1.000" y="0.000" height="1.00"/>
+    <waypoint name="ID_LOW" x="0.000" y="0.000" height="0.50"/>
+    <waypoint name="ID_HIGH" x="0.000" y="0.000" height="1.50"/>
+    <waypoint name="ID_YAW_HOLD" x="0.000" y="0.000" height="1.00"/>
+
+    <waypoint name="_CZ1" lat="51.9905834" lon="4.3767710"/>
+    <waypoint name="_CZ2" lat="51.9906440" lon="4.3767060"/>
+    <waypoint name="_CZ3" lat="51.9906860" lon="4.3768080"/>
+    <waypoint name="_CZ4" lat="51.9906238" lon="4.3768729"/>
+    <waypoint name="_OZ1" lat="51.990595" lon="4.376779"/>
+    <waypoint name="_OZ2" lat="51.990640" lon="4.376734"/>
+    <waypoint name="_OZ3" lat="51.990667" lon="4.376804"/>
+    <waypoint name="_OZ4" lat="51.990623" lon="4.376850"/>
+  </waypoints>
+
+  <sectors>
+    <sector color="red" name="CyberZoo">
+      <corner name="_CZ1"/>
+      <corner name="_CZ2"/>
+      <corner name="_CZ3"/>
+      <corner name="_CZ4"/>
+    </sector>
+    <sector color="#FF9922" name="ObstacleZone">
+      <corner name="_OZ1"/>
+      <corner name="_OZ2"/>
+      <corner name="_OZ3"/>
+      <corner name="_OZ4"/>
+    </sector>
+  </sectors>
+
+  <blocks>
+    <block name="Holding point">
+      <call_once fun="NavKillThrottle()"/>
+      <attitude pitch="0" roll="0" throttle="0" until="FALSE" vmode="throttle"/>
+    </block>
+    <block key="r" name="Start Engine">
+      <call_once fun="NavResurrect()"/>
+      <attitude pitch="0" roll="0" throttle="0" until="FALSE" vmode="throttle"/>
+    </block>
+    <block key="t" name="Takeoff" strip_button="Takeoff" strip_icon="takeoff.png">
+      <exception cond="GetPosAlt() @GT 0.95" deroute="Standby"/>
+      <call_once fun="NavSetWaypointHere(WP_CLIMB)"/>
+      <stay climb="nav_climb_vspeed" vmode="climb" wp="CLIMB"/>
+    </block>
+    <block key="s" name="Standby" strip_button="Standby" strip_icon="home.png">
+      <call_once fun="NavSetWaypointHere(WP_STDBY)"/>
+      <call_once fun="autopilot_static_set_mode(AP_MODE_NAV)"/>
+      <call_once fun="logger_file_start()"/>
+      <stay wp="STDBY"/>
+    </block>
+
+    <!-- Select one block at a time in NAV. Each block holds its waypoint. -->
+    <block name="INDI Center" group="INDI" strip_button="Center">
+      <stay wp="ID_CENTER"/>
+    </block>
+    <block name="INDI Forward" group="INDI" strip_button="Forward">
+      <stay wp="ID_FORWARD"/>
+    </block>
+    <block name="INDI Backward" group="INDI" strip_button="Backward">
+      <stay wp="ID_BACKWARD"/>
+    </block>
+    <block name="INDI Left" group="INDI" strip_button="Left">
+      <stay wp="ID_LEFT"/>
+    </block>
+    <block name="INDI Right" group="INDI" strip_button="Right">
+      <stay wp="ID_RIGHT"/>
+    </block>
+    <block name="INDI Low" group="INDI" strip_button="0.50 m">
+      <stay wp="ID_LOW"/>
+    </block>
+    <block name="INDI High" group="INDI" strip_button="1.50 m">
+      <stay wp="ID_HIGH"/>
+    </block>
+
+    <block name="INDI Yaw Left" group="INDI" strip_button="Yaw left">
+      <call_once fun="indi_capture_yaw_hold(WP_ID_YAW_HOLD)"/>
+      <stay wp="ID_YAW_HOLD" pre_call="nav_set_heading_deg(-20.0)"/>
+    </block>
+    <block name="INDI Yaw Right" group="INDI" strip_button="Yaw right">
+      <call_once fun="indi_capture_yaw_hold(WP_ID_YAW_HOLD)"/>
+      <stay wp="ID_YAW_HOLD" pre_call="nav_set_heading_deg(20.0)"/>
+    </block>
+    <block name="INDI Yaw Back" group="INDI" strip_button="Yaw back to 67">
+      <call_once fun="indi_capture_yaw_hold(WP_ID_YAW_HOLD)"/>
+      <stay wp="ID_YAW_HOLD" pre_call="nav_set_heading_deg(0.0)"/>
+    </block>
+
+    <block key="l" name="land here" strip_button="Land Here" strip_icon="land-right.png">
+      <call_once fun="autopilot_static_set_mode(AP_MODE_NAV)"/>
+      <call_once fun="NavSetWaypointHere(WP_TD)"/>
+      <go wp="TD"/>
+      <deroute block="Flare"/>
+    </block>
+    <block name="Land">
+      <call_once fun="autopilot_static_set_mode(AP_MODE_NAV)"/>
+      <go wp="TD"/>
+      <deroute block="Flare"/>
+    </block>
+    <block name="Flare">
+      <exception cond="NavDetectGround()" deroute="Holding point"/>
+      <exception cond="!nav_is_in_flight()" deroute="Landed"/>
+      <exception cond="0.10 @GT GetPosAlt()" deroute="Landed"/>
+      <call_once fun="NavStartDetectGround()"/>
+      <stay climb="nav_descend_vspeed" vmode="climb" wp="TD"/>
+    </block>
+    <block name="Landed">
+      <call_once fun="NavKillThrottle()"/>
+      <attitude pitch="0" roll="0" throttle="0" until="FALSE" vmode="throttle"/>
+    </block>
+  </blocks>
+</flight_plan>

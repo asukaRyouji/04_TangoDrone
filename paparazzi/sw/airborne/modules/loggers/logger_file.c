@@ -12,10 +12,8 @@
  *   - lateral OF/yaw controller diagnostics
  *   - logger execution-time diagnostics
  *
- * Removes the older hover-tuning blocks:
- *   detailed VS settle kinematics/trim diagnostics,
- *   forward PID internals, vertical/horizontal guidance internals,
- *   Bebop RPMs, full ins_ext_pose dump, INDI internals, actuator commands.
+ * Real-flight rows also contain NAV setpoints, attitude and thrust demands,
+ * captured settle references, and the latest raw OptiTrack position.
  */
 
 #include "logger_file.h"
@@ -41,6 +39,10 @@
 #endif
 #include "modules/mission/moving_setup_logger_optitrack.h"
 #ifndef VS_SIM_NO_EXT_POSE
+#include "firmwares/rotorcraft/guidance/guidance_v.h"
+#include "firmwares/rotorcraft/navigation.h"
+#include "firmwares/rotorcraft/stabilization.h"
+#include "firmwares/rotorcraft/stabilization/stabilization_indi_simple.h"
 #include "modules/ins/ins_ext_pose.h"
 #endif
 
@@ -529,6 +531,65 @@ static void logger_metadata(FILE *f)
 #endif
 }
 
+#ifndef VS_SIM_NO_EXT_POSE
+static void logger_file_write_hover_header(FILE *file)
+{
+  fputs(
+    ",nav_alt_requested_m,nav_alt_active_m,nav_alt_sp_m,nav_alt_ref_m"
+    ",nav_sp_n_m,nav_sp_e_m,nav_ref_n_m,nav_ref_e_m,nav_ref_vn_mps,nav_ref_ve_mps"
+    ",nav_h_p_gain,nav_h_d_gain,nav_h_i_gain,nav_h_d_n_rad,nav_h_d_e_rad"
+    ",nav_v_mode,nav_v_p_gain,nav_v_d_gain,nav_v_i_gain,nav_hover_throttle"
+    ",att_sp_phi_rad,att_sp_theta_rad,att_sp_psi_rad,cmd_thrust"
+    ",vs_settle_ref_n_m,vs_settle_ref_e_m,vs_settle_ref_height_m"
+    ",vs_settle_elapsed_s,vs_settle_roll_trim_valid"
+    ",optitrack_pos_e_m,optitrack_pos_n_m,optitrack_pos_up_m,optitrack_ready,optitrack_fresh"
+    ",indi_g1_p,indi_g1_q,indi_g1_r,indi_g2,nav_h_i_n_rad,nav_h_i_e_rad",
+    file
+  );
+}
+
+static void logger_file_write_hover_row(FILE *file)
+{
+  /* Requested and latched NAV altitude are ENU. Guidance z is NED. */
+  fprintf(file, ",%.6f,%.6f,%.6f,%.6f",
+    POS_FLOAT_OF_BFP(nav_altitude),
+    POS_FLOAT_OF_BFP(nav_flight_altitude),
+    -POS_FLOAT_OF_BFP(guidance_v_z_sp),
+    -POS_FLOAT_OF_BFP(guidance_v_z_ref));
+  fprintf(file, ",%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
+    POS_FLOAT_OF_BFP(guidance_h.sp.pos.x),
+    POS_FLOAT_OF_BFP(guidance_h.sp.pos.y),
+    POS_FLOAT_OF_BFP(guidance_h.ref.pos.x),
+    POS_FLOAT_OF_BFP(guidance_h.ref.pos.y),
+    SPEED_FLOAT_OF_BFP(guidance_h.ref.speed.x),
+    SPEED_FLOAT_OF_BFP(guidance_h.ref.speed.y));
+  fprintf(file, ",%d,%d,%d,%.6f,%.6f",
+    (int)guidance_h.gains.p, (int)guidance_h.gains.d, (int)guidance_h.gains.i,
+    ANGLE_FLOAT_OF_BFP(guidance_h_d_cmd_diag.x),
+    ANGLE_FLOAT_OF_BFP(guidance_h_d_cmd_diag.y));
+  fprintf(file, ",%u,%d,%d,%d,%.6f",
+    (unsigned)guidance_v_mode, (int)guidance_v_kp, (int)guidance_v_kd,
+    (int)guidance_v_ki, guidance_v_nominal_throttle);
+  fprintf(file, ",%.6f,%.6f,%.6f,%d",
+    ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.phi),
+    ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.theta),
+    ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.psi),
+    (int)stabilization_cmd[COMMAND_THRUST]);
+  fprintf(file, ",%.6f,%.6f,%.6f,%.6f,%u",
+    visual_servoing.settle_ref_n, visual_servoing.settle_ref_e,
+    visual_servoing.settle_ref_height, visual_servoing.settle_elapsed,
+    (unsigned)visual_servoing.roll_trim_average_valid);
+  fprintf(file, ",%.6f,%.6f,%.6f,%u,%u",
+    ins_ext_pose_raw_enu_x, ins_ext_pose_raw_enu_y, ins_ext_pose_raw_enu_z,
+    (unsigned)ins_ext_pose_is_ready(), (unsigned)ins_ext_pose_is_fresh());
+  fprintf(file, ",%.6f,%.6f,%.6f,%.6f",
+    indi.g1.p, indi.g1.q, indi.g1.r, indi.g2);
+  fprintf(file, ",%.6f,%.6f",
+    ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.x),
+    ANGLE_FLOAT_OF_BFP(guidance_h_i_cmd_diag.y));
+}
+#endif
+
 static void logger_file_write_header(FILE *file)
 {
   fprintf(file, "time,");
@@ -563,8 +624,12 @@ static void logger_file_write_header(FILE *file)
   fprintf(
     file,
     "logger_write_usec,"
-    "logger_max_write_usec\n"
+    "logger_max_write_usec"
   );
+#ifndef VS_SIM_NO_EXT_POSE
+  logger_file_write_hover_header(file);
+#endif
+  fputc('\n', file);
 }
 
 static void logger_file_write_row(FILE *file)
@@ -622,10 +687,14 @@ static void logger_file_write_row(FILE *file)
    */
   fprintf(
     file,
-    "%u,%u\n",
+    "%u,%u",
     (unsigned int)logger_last_write_usec,
     (unsigned int)logger_max_write_usec
   );
+#ifndef VS_SIM_NO_EXT_POSE
+  logger_file_write_hover_row(file);
+#endif
+  fputc('\n', file);
 }
 
 void logger_file_start(void)

@@ -490,7 +490,7 @@ static bool visual_servoing_pose_available(void)
  * duration. Any violation resets the timer to zero.
  */
 #ifndef VS_SETTLE_DWELL_TIME
-#define VS_SETTLE_DWELL_TIME 0.30f
+#define VS_SETTLE_DWELL_TIME 0.20f
 #endif
 
 #ifndef VS_SETTLE_FILTER_CUTOFF
@@ -2426,13 +2426,14 @@ static void visual_servoing_update_activation(uint32_t now_us)
    *
    *   1. mechanical settle dwell complete;
    *   2. NAV-derived roll-trim average valid;
-   *   3. KF3 has accumulated a continuous two-second visual pre-roll.
+   *   3. KF3 has accumulated a continuous two-second visual pre-roll;
+   *   4. the B54 acceleration model is ready when self-oscillation is enabled.
    */
   if (!visual_servoing.roll_trim_average_valid ||
       !visual_servoing.kf_warmup_ready ||
       !visual_servoing.of_ready ||
       !visual_servoing.vision_valid ||
-      !vs_distance_observer.model.ready)
+      (VS_SELF_OSC && !vs_distance_observer.model.ready))
   {
       return;
   }
@@ -2469,6 +2470,38 @@ static void visual_servoing_update_activation(uint32_t now_us)
   }
 }
 
+static void visual_servoing_update_model_preroll(double now)
+{
+  struct VsModel *model = &vs_distance_observer.model;
+#ifdef VS_SIM_NO_EXT_POSE
+  /* Reproduce the stationary, zero-command initialization used for NPS. */
+  const struct NedCoor_f *v=stateGetSpeedNed_f(), *p=stateGetPositionNed_f();
+  const bool quiet=visual_servoing.activation_requested && visual_servoing_pose_available() &&
+    hypotf(v->x,v->y)<0.03f && fabsf(v->z)<0.03f &&
+    hypotf(p->x-visual_servoing.settle_ref_n,p->y-visual_servoing.settle_ref_e)<0.05f &&
+    fabsf(-p->z-visual_servoing.settle_ref_height)<0.05f;
+  vs_model_command(model, now, 0.0, quiet, true);
+#else
+  const bool nav_mode = guidance_h.mode == GUIDANCE_H_MODE_NAV ||
+                        guidance_h.mode == GUIDANCE_H_MODE_HOVER;
+  const bool valid_input = visual_servoing.activation_requested && nav_mode &&
+                           autopilot_in_flight() && visual_servoing_pose_available();
+  float trim_roll;
+  if (!valid_input || !visual_servoing_get_nav_roll_trim(&trim_roll)) {
+    vs_model_command(model, now, 0.0, false, false);
+    return;
+  }
+
+  const struct NedCoor_f *v = stateGetSpeedNed_f();
+  const float psi = stateGetNedToBodyEulers_f()->psi;
+  const float velocity_right = -sinf(psi) * v->x + cosf(psi) * v->y;
+  const float nav_roll = ANGLE_FLOAT_OF_BFP(stab_att_sp_euler.phi);
+  /* MODULE adds trim in acceleration units before converting to roll. */
+  const float lateral_command = 9.81f * (tanf(nav_roll) - tanf(trim_roll));
+  vs_model_command_with_velocity(model, now, lateral_command, velocity_right, valid_input);
+#endif
+}
+
 void visual_servoing_observer_periodic(void)
 {
   const uint32_t now_us = get_sys_time_usec();
@@ -2480,12 +2513,7 @@ void visual_servoing_observer_periodic(void)
       vs_distance_observer.armed=false;
       vs_dobs_reset_range(&vs_distance_observer,VS_OBS_MODE_EXIT);
     }
-    const struct NedCoor_f *v=stateGetSpeedNed_f(), *p=stateGetPositionNed_f();
-    const bool quiet=visual_servoing.activation_requested && visual_servoing_pose_available() &&
-      hypotf(v->x,v->y)<0.03f && fabsf(v->z)<0.03f &&
-      hypotf(p->x-visual_servoing.settle_ref_n,p->y-visual_servoing.settle_ref_e)<0.05f &&
-      fabsf(-p->z-visual_servoing.settle_ref_height)<0.05f;
-    vs_model_command(&vs_distance_observer.model,now,0,quiet,true);
+    visual_servoing_update_model_preroll(now);
   }
   vs_was_module=module;
   vs_context_add(now);
@@ -2996,9 +3024,16 @@ void visual_servoing_module_run(bool in_flight)
   visual_servoing.applied_command_valid=in_flight && visual_servoing.pose_ok;
   visual_servoing.command_stamp_us=now_us;
   visual_servoing.command_sequence++;
-  vs_model_command(&vs_distance_observer.model,visual_servoing_time_s(now_us),
-      visual_servoing.mu_y_control,visual_servoing.applied_command_valid,false);
-  vs_context_add(visual_servoing_time_s(now_us));
+  const double command_time_s = visual_servoing_time_s(now_us);
+#ifdef VS_SIM_NO_EXT_POSE
+  vs_model_command(&vs_distance_observer.model, command_time_s,
+                   visual_servoing.mu_y_control, visual_servoing.applied_command_valid, false);
+#else
+  vs_model_command_with_velocity(&vs_distance_observer.model, command_time_s,
+                                 visual_servoing.mu_y_control, visual_servoing.right_velocity,
+                                 visual_servoing.applied_command_valid);
+#endif
+  vs_context_add(command_time_s);
   visual_servoing.mu_y_target = visual_servoing.mu_y_trim + visual_servoing.mu_y_control;
   visual_servoing.mu_y = visual_servoing_slew(
       visual_servoing.mu_y, visual_servoing.mu_y_target,
