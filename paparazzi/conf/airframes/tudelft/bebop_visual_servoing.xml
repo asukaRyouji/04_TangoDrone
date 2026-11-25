@@ -42,7 +42,7 @@
 
       <!-- Lower-limit September 29 profile for bench review. Verify
            lateral gains and limits against the last flown AP airframe. -->
-      <define name="VS_ROLL_TRIM_OVERRIDE_DEG" value="-1.85"/>
+      <!-- define name="VS_ROLL_TRIM_OVERRIDE_DEG" value="-1.85"/ -->
       <define name="VS_OL_Y_OF_GAIN" value="1.80"/>
       <define name="VS_OL_Y_YAW_GAIN" value="1.80"/>
       <define name="VS_LAT_MAX_ACCEL" value="4.00"/>
@@ -223,11 +223,11 @@
       -->
       <define
         name="VS_SETTLE_FWD_SPEED_MAX"
-        value="0.015"/>
+        value="0.030"/>
 
       <define
         name="VS_SETTLE_RIGHT_SPEED_MAX"
-        value="0.025"/>
+        value="0.020"/>
 
       <define
         name="VS_SETTLE_RAW_RIGHT_SPEED_MAX"
@@ -236,7 +236,7 @@
 
       <define
         name="VS_SETTLE_VERTICAL_SPEED_MAX"
-        value="0.030"/>
+        value="0.020"/>
 
       <define
         name="VS_SETTLE_DWELL_TIME"
@@ -248,7 +248,7 @@
 
       <define
         name="VS_SETTLE_RIGHT_POS_MAX"
-        value="0.020"/>
+        value="0.030"/>
         
       <define
         name="VS_SETTLE_VERTICAL_POS_MAX"
@@ -509,7 +509,7 @@
     <define name="MAX_R" value="120.0" unit="deg/s"/>
 
     <!-- second order filter parameters -->
-    <define name="FILT_CUTOFF" value="10.0"/>
+    <define name="FILT_CUTOFF" value="8.0"/>
     <define name="ESTIMATION_FILT_CUTOFF" value="8.0"/>
 
     <!-- first order actuator dynamics -->
@@ -523,9 +523,9 @@
   </section>
 
   <section name="GUIDANCE_V" prefix="GUIDANCE_V_">
-    <define name="HOVER_KP" value="283"/>
-    <define name="HOVER_KD" value="82"/>
-    <define name="HOVER_KI" value="20"/>
+    <define name="HOVER_KP" value="500"/>
+    <define name="HOVER_KD" value="216"/>
+    <define name="HOVER_KI" value="60"/>
     <define name="NOMINAL_HOVER_THROTTLE" value="0.708"/>
     <define name="ADAPT_THROTTLE_ENABLED" value="FALSE"/>
 
@@ -541,8 +541,8 @@
     <define name="REF_MAX_SPEED" value="2" unit="m/s"/>
     <!-- Bad weather -->
     <!-- define name="MAX_BANK" value="32" unit="deg"/ -->
-    <define name="PGAIN" value="120"/>
-    <define name="DGAIN" value="100"/>
+    <define name="PGAIN" value="300"/>
+    <define name="DGAIN" value="210"/>
     <define name="IGAIN" value="30"/>
   </section>
 

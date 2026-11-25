@@ -53,7 +53,7 @@
 #endif
 
 #ifndef INS_EXT_POSE_R_POS
-#define INS_EXT_POSE_R_POS 0.00001f
+#define INS_EXT_POSE_R_POS 0.001f
 #endif
 
 #ifndef INS_EXT_POSE_R_VEL
