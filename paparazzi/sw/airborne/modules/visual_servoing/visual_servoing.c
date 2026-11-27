@@ -304,7 +304,20 @@ static bool visual_servoing_pose_available(void)
 #define VS_OL_Y_YAW_GAIN 5.80f
 #endif
 
-/* ONE total lateral acceleration limit: responsive OF+yaw plus optional H1+H2. */
+/* Lateral image-position gain [m/s^2 per pixel] and correction limit [m/s^2]. */
+#ifndef VS_LAT_IMAGE_POS_KP
+#define VS_LAT_IMAGE_POS_KP 0.0f
+#endif
+
+#ifndef VS_LAT_IMAGE_POS_MAX_ACCEL
+#define VS_LAT_IMAGE_POS_MAX_ACCEL 0.1712f
+#endif
+
+#define VS_LAT_IMAGE_POS_REF_WINDOW_US 300000U
+#define VS_LAT_IMAGE_POS_REF_MIN_SAMPLES 3U
+#define VS_LAT_IMAGE_POS_REF_MAX_SAMPLES 96U
+
+/* Common acceleration limit for lateral feedback and active excitation. */
 #ifndef VS_LAT_MAX_ACCEL
 #define VS_LAT_MAX_ACCEL 10.00f
 #endif
@@ -702,6 +715,21 @@ static void color_detection_cb(uint8_t __attribute__((unused)) sender_id, uint32
 // struct containing most relevant parameters
 struct VisualServoing visual_servoing;
 
+struct VsImagePositionSample {
+  uint32_t capture_us;
+  float centroid_px;
+};
+
+struct VsImagePositionReference {
+  struct VsImagePositionSample samples[VS_LAT_IMAGE_POS_REF_MAX_SAMPLES];
+  uint8_t sample_count;
+  uint8_t next_sample;
+  float setpoint_px;
+  bool valid;
+};
+
+static struct VsImagePositionReference lateral_image_reference;
+
 void visual_servoing_module_init(void);
 
 void visual_servoing_module_run(bool in_flight);
@@ -824,6 +852,7 @@ static float visual_servoing_slew(float current, float target, float rate_limit,
  */
 void visual_servoing_module_init(void)
 {
+  lateral_image_reference = (struct VsImagePositionReference){0};
   memset(&visual_servoing,0,sizeof(visual_servoing));
   vs_dobs_init(&vs_distance_observer);
   vs_clock_initialized=vs_source_initialized=vs_was_module=false;
@@ -1259,6 +1288,7 @@ void visual_servoing_request_start(void)
    */
   visual_servoing_reset_roll_trim_average();
   visual_servoing_reset_pitch_trim_average();
+  lateral_image_reference.valid = false;
 
   /*
    * ============================================================
@@ -1368,6 +1398,7 @@ void visual_servoing_request_start(void)
 
 void visual_servoing_cancel_request(void)
 {
+  lateral_image_reference.valid = false;
   visual_servoing_reset_pitch_trim_average();
   visual_servoing.mu_y_control=0;
   visual_servoing.applied_command_valid=false;
@@ -1526,6 +1557,8 @@ static void visual_servoing_reset_of_state(void)
 
 static void visual_servoing_kf_warmup_reset(void)
 {
+  lateral_image_reference.sample_count = 0U;
+  lateral_image_reference.next_sample = 0U;
   visual_servoing.kf_warmup_start_us = 0U;
   visual_servoing.kf_warmup_valid_frames = 0U;
   visual_servoing.kf_warmup_elapsed = 0.0f;
@@ -1557,6 +1590,54 @@ static void visual_servoing_kf_warmup_note_valid_frame(uint32_t now_us)
     visual_servoing.of_ready &&
     visual_servoing.kf_warmup_elapsed >= VS_KF3_WARMUP_TIME &&
     visual_servoing.kf_warmup_valid_frames >= VS_KF3_WARMUP_MIN_FRAMES;
+
+  if (VS_SELF_OSC && VS_LAT_IMAGE_POS_KP > 0.0f && visual_servoing.of_ready &&
+      visual_servoing.kf_initialized && isfinite(visual_servoing.kf_centroid)) {
+    const uint8_t slot = lateral_image_reference.next_sample;
+    lateral_image_reference.samples[slot] = (struct VsImagePositionSample){
+      .capture_us = visual_servoing.vision_stamp_us,
+      .centroid_px = visual_servoing.kf_centroid,
+    };
+    lateral_image_reference.next_sample = (slot + 1U) % VS_LAT_IMAGE_POS_REF_MAX_SAMPLES;
+    if (lateral_image_reference.sample_count < VS_LAT_IMAGE_POS_REF_MAX_SAMPLES) {
+      lateral_image_reference.sample_count++;
+    }
+  }
+}
+
+static void visual_servoing_capture_image_position_reference(uint32_t now_us)
+{
+  float sum_px = 0.0f;
+  uint8_t recent_samples = 0U;
+  if (VS_SELF_OSC && VS_LAT_IMAGE_POS_KP > 0.0f && visual_servoing.kf_warmup_ready &&
+      visual_servoing.vision_valid && visual_servoing.of_ready) {
+    for (uint8_t i = 0U; i < lateral_image_reference.sample_count; i++) {
+      const struct VsImagePositionSample *sample = &lateral_image_reference.samples[i];
+      if (now_us - sample->capture_us <= VS_LAT_IMAGE_POS_REF_WINDOW_US) {
+        sum_px += sample->centroid_px;
+        recent_samples++;
+      }
+    }
+  }
+  lateral_image_reference.valid = recent_samples >= VS_LAT_IMAGE_POS_REF_MIN_SAMPLES;
+  if (lateral_image_reference.valid) {
+    lateral_image_reference.setpoint_px = sum_px / recent_samples;
+  }
+  lateral_image_reference.sample_count = 0U;
+  lateral_image_reference.next_sample = 0U;
+}
+
+static float visual_servoing_image_position_accel(void)
+{
+  if (VS_LAT_IMAGE_POS_KP <= 0.0f || !lateral_image_reference.valid ||
+      !visual_servoing.vision_valid || !visual_servoing.kf_initialized ||
+      !isfinite(visual_servoing.kf_centroid)) {
+    return 0.0f;
+  }
+  /* In the AP camera coordinates, rightward motion increases centroid_y. */
+  float accel = VS_LAT_IMAGE_POS_KP * (lateral_image_reference.setpoint_px - visual_servoing.kf_centroid);
+  BoundAbs(accel, VS_LAT_IMAGE_POS_MAX_ACCEL);
+  return accel;
 }
 
 /*
@@ -1973,6 +2054,7 @@ static void visual_servoing_capture_reference(void)
     visual_servoing_reset_of_state();
   }
 
+  visual_servoing_capture_image_position_reference(get_sys_time_usec());
   visual_servoing.pose_ok = visual_servoing_pose_available();
 
   /*
@@ -3045,6 +3127,7 @@ void visual_servoing_module_run(bool in_flight)
       }
       visual_servoing.mu_y_active = h1 + h2;
       visual_servoing.mu_y_control += visual_servoing.mu_y_active;
+      visual_servoing.mu_y_control += visual_servoing_image_position_accel();
     }
 
     visual_servoing.using_of_control = true;
@@ -3072,7 +3155,7 @@ void visual_servoing_module_run(bool in_flight)
     }
   }
 
-  /* ONE total OF+yaw+H1+H2 acceleration bound and ONE lateral slew limiter. */
+  /* Apply the common acceleration and slew bounds to all lateral terms. */
   visual_servoing.mu_y_unbounded=visual_servoing.mu_y_control;
   Bound(visual_servoing.mu_y_control,
         -visual_servoing.lat_max_accel, visual_servoing.lat_max_accel);
